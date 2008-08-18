@@ -1,5 +1,5 @@
 <?php
-// $Id: sphinxsearch.module,v 1.1 2008/08/18 13:51:28 markuspetrux Exp $
+// $Id: sphinxsearch.module,v 1.2 2008/08/18 17:53:09 markuspetrux Exp $
 
 /**
  * @file
@@ -132,9 +132,9 @@ function sphinxsearch_nodeapi(&$node, $op, $a3 = NULL, $a4 = NULL) {
 /**
  * Delete a node from Sphinx indexes.
  *
- * Sphinx document deletions are updated in realtime using setting the
- * is_deleted attribute of the document to 1.
- * Sphinx updates are sent to all indexes behind a distributed index.
+ * Sphinx document deletions are updated in realtime using UpdateAttributes()
+ * API to set the is_deleted attribute of the document to 1.
+ * These Sphinx updates are sent to all indexes behind a distributed index.
  * To completely remove all deleted nodes from Sphinx indexes, it is
  * necessary to rebuild main indexes from time to time.
  *
@@ -251,8 +251,6 @@ function sphinxsearch_get_enabled_node_types_condition($table_alias = '') {
  * This array is used to convert node types as string to
  * numeric identifiers, so this data can be stored in
  * Sphinx indexes as simple uint attributes.
- *
- * This array is initialized by xmlpipe/init request.
  */
 function sphinxsearch_reset_node_type_ids() {
   variable_set('sphinxsearch_node_type_ids', array(''));
@@ -285,14 +283,17 @@ function &sphinxsearch_get_client() {
     include_once(drupal_get_path('module', 'sphinxsearch') .'/lib/sphinxapi.php');
     $sphinxsearch = new SphinxClient();
     $sphinxsearch->SetServer(variable_get('sphinxsearch_searchd_host', 'localhost'), (int)variable_get('sphinxsearch_searchd_port', '3312'));
+
     // Setup connection timeout?
     if (($sphinxsearch_searchd_timeout = (int)variable_get('sphinxsearch_searchd_timeout', 0)) > 0) {
       $sphinxsearch->SetConnectTimeout($sphinxsearch_searchd_timeout);
     }
+
     // Setup max query time?
     if (($sphinxsearch_searchd_maxquerytime = (int)variable_get('sphinxsearch_searchd_maxquerytime', 0)) > 0) {
       $sphinxsearch->SetMaxQueryTime($sphinxsearch_searchd_maxquerytime * 1000);
     }
+
     // Setup distributed retries?
     if (($sphinxsearch_retries_count = (int)variable_get('sphinxsearch_retries_count', 0)) > 0) {
       $sphinxsearch_retries_delay = (int)variable_get('sphinxsearch_retries_delay', 0);
@@ -309,7 +310,7 @@ function &sphinxsearch_get_client() {
  * @param object reference $node
  *   Node reference to extract text from.
  * @return string
- *   Rext representation of the node.
+ *   Text representation of the node.
  */
 function sphinxsearch_get_node_text(&$node) {
   // Build the node body.
