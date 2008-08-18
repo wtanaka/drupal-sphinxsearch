@@ -1,4 +1,4 @@
-$Id: README-XMLPIPE.txt,v 1.1 2008/08/18 13:52:24 markuspetrux Exp $
+$Id: README-XMLPIPE.txt,v 1.2 2008/08/18 14:46:56 markuspetrux Exp $
 
 The sphinxsearch_scripts directory under the sphinxsearch module contains the
 script that is used to generate XMLPipe sources for your Sphinx indexes.
@@ -70,13 +70,16 @@ depending on the complexity of your Drupal installation, hardware, etc.
     main index would have capacity for al least 100000 documents. xmlpipe
     commands for these indexes would look like:
 
-    http://www.example.com/sphinxsearch_scripts/sphinxsearch_xmlpipe.php?mode=main&main_index_id=0&first_nid=0&last_nid=99999
-    http://www.example.com/sphinxsearch_scripts/sphinxsearch_xmlpipe.php?mode=main&main_index_id=1&first_nid=100000&last_nid=199999
-    http://www.example.com/sphinxsearch_scripts/sphinxsearch_xmlpipe.php?mode=main&main_index_id=2&first_nid=200000&last_nid=299999
+    http://www.example.com/sphinxsearch_scripts/sphinxsearch_xmlpipe.php?mode=main&id=0&first_nid=0&last_nid=99999
+    http://www.example.com/sphinxsearch_scripts/sphinxsearch_xmlpipe.php?mode=main&id=1&first_nid=100000&last_nid=199999
+    http://www.example.com/sphinxsearch_scripts/sphinxsearch_xmlpipe.php?mode=main&id=2&first_nid=200000
     http://www.example.com/sphinxsearch_scripts/sphinxsearch_xmlpipe.php?mode=delta
 
   - Your main indexes would hold documents for all existing nodes within
     specified range at the time each main index was created.
+
+  - Last main index would hold documents from nid 200000 to the last node in
+    your site. You may need to add more main indexes as your site grows.
 
   - Your delta index would hold documents for all new or updated nodes since
     last time your main indexes were created. Note that you don't need a delta
