@@ -1,4 +1,6 @@
 #!/bin/sh
+# $Id: sphinx,v 1.2 2008/08/18 15:13:44 markuspetrux Exp $
+#
 # sphinx - This shell script takes care of starting and
 # stopping Sphinx search daemon.
 # It also has options to build main and delta indexes.
@@ -171,7 +173,7 @@ case "$1" in
 		echo $"Usage: sphinx {start|stop|restart|status|main|delta}"
 		echo "    start     - Start searchd daemon."
 		echo "    stop      - Stop searchd daemon."
-		echo "    restart   - Start and then stop searchd daemon."
+		echo "    restart   - Stop and then start searchd daemon."
 		echo "    status    - Display ps auxw for searchd daemon."
 		echo "    main [X]  - Build specified main index (X is opcional)."
 		echo "    delta     - Build delta index."

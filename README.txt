@@ -1,6 +1,6 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Sphinx search module for Drupal 5.x
-;; $Id: README.txt,v 1.1 2008/08/18 13:49:10 markuspetrux Exp $
+;; $Id: README.txt,v 1.2 2008/08/18 15:13:44 markuspetrux Exp $
 ;;
 ;; Original author: markus_petrux at drupal.org (July 2008)
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -8,10 +8,9 @@
 REQUIREMENTS
 ============
 
-  - Drupal 5.x
-  - PHP 4.4.x or PHP 5.x
-    PHP needs to be compiled with --enable-memory-limit.
-  - MySQL, but it also may work with PostgreSQL.
+  - Drupal 5.x (planned port to D6)
+  - PHP 4.4.x or PHP 5.x (PHP needs to be compiled with --enable-memory-limit).
+  - It should work for any DB engine supported by Drupal.
   - Sphinx 0.9.8
   - Shell access to the box where Sphinx is installed.
 
@@ -66,8 +65,8 @@ INSTALLATION
        your Drupal root directory.
        Instead, you may wish to setup a symbolic link from your Drupal root to
        the sphinxsearch_scripts subdirectory of this module. This way you don't
-       need to copy files when modules is updated. Please, see README-XMLPIPE.txt
-       for fuerther information and examples.
+       need to copy files when module is updated. Please, see README-XMLPIPE.txt
+       for further information and examples.
      - Goto admin/build/modules to install the module.
      - Goto admin/user/access to adjust permissions.
          (use sphinxsearch, administer sphinxsearch)
@@ -112,34 +111,34 @@ SPHINX INDEXES
 - At this time, Sphinx does not support index additions or deletions in real
   time. It only supports updates of non-text attributes. This method is used to
   updated the 'is_delete' attribute of Sphinx documents when a node is deleted.
-  All search queries sent by this module filter nodes with 'is_delete'
-  attribute set to 0, so this allows us to emmulate Sphinx document deletions.
+  All search queries sent by this module filters nodes with 'is_delete'
+  attribute set to 1, so this allows us to emmulate Sphinx document deletions.
 
 - In this scenario, we need to work in Sphinx with the so called main+delta
   scheme. See Sphinx documentation for more details. In short, main indexes
   should be rebuilt periodically in order to recover space used by deleted
   documents, and delta index should be rebuild as often as possible to take
-  care of new and updates documents.
+  care of new and updates documents until your main indexes are rebuilt.
 
 - Once you have created your main indexes, new and/or updated nodes will be
-  stored in delta index, that you can rebuild in short intervals using crontab
-  from the server that has Sphinx installed. These intervals basically depend
-  on the time required to process each delta and the number of node updates in
-  your site. You may wish to start with 5 minutes intervals and adjust your
-  crontab as you get more experience. The module generate full reports in
-  watchdog to help you monitor index processing.
+  stored in delta index. You may wish to rebuild your delta index at short
+  intervals using crontab from the server where Sphinx has been installed.
+  These intervals basically depend on the time required to process each delta
+  and the number of node updates in your site. You may wish to start with 5
+  minutes and adjust your crontab as you get more experience. The module
+  generate full reports in watchdog to help you monitor index processing.
 
-- I had a lot of problems related to resource consumption in Drupal to generate
-  the XMLPipe stream used by Sphinx to build indexes. It all depends on the
-  complexity of your Drupal intallation, modules installed, overall size of
-  your nodes, available infraestructure, etc.
+- I had a lot of problems related to resource consumption in Drupal while
+  generating the XMLPipe stream used by Sphinx to build indexes. It all depends
+  on the complexity of your Drupal intallation, modules installed, overall size
+  of your nodes, available infraestructure, etc.
   In order to minimize these problems, I implemented in the XMLPipe generation
   script a few checks that will abort XMLPipe stream generation and report the
-  cause of the proble in watchdog. Depending on module settings, it is also
-  possible to setup the XMLPipe generation script to restart DB server
-  maximum connection problems (see module settings panel). However, you may
-  wish to adjust PHP settings from the .htaccess file provided within the
-  sphinxsearch_scripts subdirectory of this module.
+  cause of the problem in watchdog. Depending on module settings, it is also
+  possible to setup the XMLPipe generation script to restart DB server to
+  prevent from getting max connection time problems (see module settings).
+  However, you may wish to adjust PHP settings from the .htaccess file provided
+  within the sphinxsearch_scripts subdirectory of this module.
 
 - New or different ideas to fight against "limitations" related to XMLPipe
   method, Sphinx index maintenance, etc. are welcome.
@@ -153,7 +152,7 @@ TODO
 
 In no particular order...
 
-- Re-work the way search matching method are implemented. There might be
+- Re-work the way search matching methods are implemented. There might be
   options for users to select between "search all", "search any",
   "search phrase" or "boolean search".
 

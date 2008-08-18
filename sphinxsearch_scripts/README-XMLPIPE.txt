@@ -1,4 +1,6 @@
-$Id: README-XMLPIPE.txt,v 1.2 2008/08/18 14:46:56 markuspetrux Exp $
+================================================================================
+$Id: README-XMLPIPE.txt,v 1.3 2008/08/18 15:13:44 markuspetrux Exp $
+================================================================================
 
 The sphinxsearch_scripts directory under the sphinxsearch module contains the
 script that is used to generate XMLPipe sources for your Sphinx indexes.

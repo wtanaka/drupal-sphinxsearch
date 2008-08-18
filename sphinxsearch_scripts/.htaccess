@@ -1,3 +1,7 @@
+################################################################################
+# $Id: .htaccess,v 1.2 2008/08/18 15:13:44 markuspetrux Exp $
+################################################################################
+
 php_value memory_limit 64M
 php_value max_execution_time 3600
 php_value mysql.connect_timeout 3600
