@@ -1,0 +1,8 @@
+/usr/local/sphinx/var/log/*.log {
+	daily
+	rotate 7
+	create 640 root root
+	postrotate
+		/path-to-your-script/sphinx restart
+	endscript
+}

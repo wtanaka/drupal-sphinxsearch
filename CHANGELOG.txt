@@ -1,0 +1,25 @@
+2008-08-18 by markus_petrux at drupal.org, version not yet released.
+- Rewritten XMLPipe generator.
+- Created sphinxsearch_scripts subdirectory to host the main entry point for
+  the XMLPipe generator. This subdirectory allows to isolate PHP settings
+  in .htaccess file that might be required to adjust memory_limit, etc.
+- Updated documentation in README.txt and contrib subdirectory.
+
+
+2008-08-15 by markus_petrux at drupal.org, version not yet released.
+- Changed module name from sphinx to sphinxsearch.
+  Please, see following issue for references on why there is another project
+  called 'sphinx': http://drupal.org/node/296044
+
+
+2008-07-30 by markus_petrux at drupal.org, version not yet released.
+
+- Moved Sphinx client class script to lib subdirectory.
+- Added is_deleted attribute (boolean, default 0) to XMLPipe structure.
+- Added code in sphinx_queue_node_index() to update is_deleted attribute
+  in realtime using Sphinx API UpdateAttributes().
+- Fixed small bug in sphinx_get_node_text().
+- Fixed search path used for watchdog in sphinx_search_page().
+- Fixed query arguments returned by sphinx_search_form_submit().
+- Added sample logrotate configuration script in contrib folder.
+- A few changes/improvements in contrib/sphinx script.

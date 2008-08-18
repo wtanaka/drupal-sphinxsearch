@@ -1,0 +1,16 @@
+<?php
+// $Id: sphinxsearch.install,v 1.1 2008/08/18 13:51:28 markuspetrux Exp $
+
+/**
+ * @file
+ * Module installation/uninstallation hooks.
+ */
+
+/**
+ * Implementation of hook_uninstall().
+ */
+function sphinxsearch_uninstall() {
+  // Delete all module variables and then clear the variable cache.
+  db_query("DELETE FROM {variable} WHERE name LIKE 'sphinxsearch\_%'");
+  cache_clear_all('variables', 'cache');
+}

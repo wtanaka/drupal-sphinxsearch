@@ -1,0 +1,345 @@
+<?php
+// $Id: sphinxsearch.module,v 1.1 2008/08/18 13:51:28 markuspetrux Exp $
+
+/**
+ * @file
+ * Sphinx search integration for Drupal, based on XMLPipe source type
+ * and support for main+delta index scheme.
+ */
+
+/**
+ * Path for user search page.
+ *
+ * I think this one doesn't conflict with any other module out there.
+ * Actually, this path may change in the future depending on how
+ * Drupal integration of this module is finally approached.
+ * Please, see README.txt and or check issue queue for this module.
+ */
+define('SPHINXSEARCH_PATH_PREFIX', 'search-content');
+
+
+/**
+ * Implementation of hook_help().
+ */
+function sphinxsearch_help($section) {
+  switch ($section) {
+    case 'admin/help#search':
+      $output = '<p>'. t('The Sphinx search module replaces Drupal search capabilities for searching content.') .'</p>';
+      return $output;
+    case 'admin/settings/search':
+      return '<p>'. t('You can adjust the settings below to tweak the Sphinx behaviour. It is recommended to install Sphinx on a separate machine. You also need to schedule index updates perioically. Index updates are processed by Sphinx indexer.') .'</p>';
+    case 'search#noresults':
+      return t('<ul>
+<li>Check if your spelling is correct.</li>
+<li>Remove quotes around phrases to match each word individually: <em>"blue smurf"</em> will match less than <em>blue smurf</em>.</li>
+<li>Consider loosening your query with <em>OR</em>: <em>blue smurf</em> will match less than <em>blue OR smurf</em>.</li>
+</ul>');
+  }
+}
+
+/**
+ * Implementation of hook_perm().
+ */
+function sphinxsearch_perm() {
+  return array('use sphinxsearch', 'administer sphinxsearch');
+}
+
+/**
+ * Implementation of hook_menu().
+ */
+function sphinxsearch_menu($may_cache) {
+  $items = array();
+  if ($may_cache) {
+    $items[] = array(
+      'path' => 'admin/settings/sphinxsearch',
+      'title' => t('Sphinx search settings'),
+      'description' => t('Administer Sphinx search module settings'),
+      'callback' => 'drupal_get_form',
+      'callback arguments' => 'sphinxsearch_settings',
+      'access' => user_access('administer sphinxsearch'),
+    );
+    $items[] = array(
+      'path' => SPHINXSEARCH_PATH_PREFIX,
+      'title' => t('Search'),
+      'callback' => 'sphinxsearch_search_page',
+      'access' => user_access('use sphinxsearch'),
+      'type' => MENU_SUGGESTED_ITEM,
+    );
+  }
+  else {
+    if (arg(0) == 'admin' && arg(1) == 'settings' && arg(2) == 'sphinxsearch') {
+      include_once(drupal_get_path('module', 'sphinxsearch') .'/sphinxsearch.admin.inc');
+    }
+    else if (arg(0) == SPHINXSEARCH_PATH_PREFIX) {
+      include_once(drupal_get_path('module', 'sphinxsearch') .'/sphinxsearch.pages.inc');
+    }
+  }
+  return $items;
+}
+
+/**
+ * Implementation of hook_block().
+ */
+function sphinxsearch_block($op = 'list', $delta = 0) {
+  if ($op == 'list') {
+    return array(
+      array('info' => t('Sphinx search box')),
+    );
+  }
+  else if ($op == 'view' && user_access('use sphinxsearch')) {
+    return array(
+      'subject' => t('Search'),
+      'content' => drupal_get_form('sphinxsearch_search_box'),
+    );
+  }
+}
+function sphinxsearch_search_box() {
+  $form = array();
+  $form['inline'] = array('#prefix' => '<div class="container-inline">', '#suffix' => '</div>');
+  $form['inline']['keys'] = array(
+    '#type' => 'textfield',
+    '#size' => 30,
+    '#default_value' => '',
+    '#attributes' => array('title' => t('Enter the terms you wish to search for.')),
+  );
+  $form['inline']['submit'] = array('#type' => 'submit', '#value' => t('Search'));
+  $form['#action'] = url(SPHINXSEARCH_PATH_PREFIX);
+  return $form;
+}
+function sphinxsearch_search_box_submit($form_id, $form_values) {
+  $return_path = SPHINXSEARCH_PATH_PREFIX;
+  // Remove redundant whitespaces.
+  $keys = preg_replace('#\s+#', ' ', trim($form_values['keys']));
+  if (!empty($keys)) {
+    $return_path .= '/'. $keys;
+  }
+  return $return_path;
+}
+
+/**
+ * Implementation of hook_nodeapi().
+ */
+function sphinxsearch_nodeapi(&$node, $op, $a3 = NULL, $a4 = NULL) {
+  if ($op == 'delete') {
+    // Update Sphinx documents when node is deleted.
+    $sphinxsearch_enabled_node_types = sphinxsearch_get_enabled_node_types();
+    if (empty($sphinxsearch_enabled_node_types) || in_array($node->type, $sphinxsearch_enabled_node_types)) {
+      sphinxsearch_delete_node_from_index($node->nid);
+    }
+  }
+}
+
+/**
+ * Delete a node from Sphinx indexes.
+ *
+ * Sphinx document deletions are updated in realtime using setting the
+ * is_deleted attribute of the document to 1.
+ * Sphinx updates are sent to all indexes behind a distributed index.
+ * To completely remove all deleted nodes from Sphinx indexes, it is
+ * necessary to rebuild main indexes from time to time.
+ *
+ * @param int $nid
+ *   Node Identifier.
+ */
+function sphinxsearch_delete_node_from_index($nid) {
+  $sphinxsearch_query_index = variable_get('sphinxsearch_query_index', '');
+  $sphinxsearch_docid_offset = (int)variable_get('sphinxsearch_docid_offset', 0);
+  $sphinxsearch = sphinxsearch_get_client();
+
+  $count = $sphinxsearch->UpdateAttributes($sphinxsearch_query_index, array('is_deleted'), array(
+    ($nid + $sphinxsearch_docid_offset) => array(1)
+  ));
+
+  // Note: count should be number of updated documents, -1 if error.
+  if ($count <= 0) {
+    watchdog('sphinxsearch', t('Node @nid could not be deleted from Sphinx index. Last Sphinx Error: !message', array(
+      '@nid' => $nid,
+      '!message' => $sphinxsearch->GetLastError()
+    )), WATCHDOG_WARNING);
+  }
+}
+
+/**
+ * Obtain PHP memory_limit.
+ *
+ * Requirements: PHP needs to be compiled with --enable-memory-limit.
+ * @see http://www.php.net/manual/en/faq.using.php#faq.using.shorthandbytes
+ *
+ * @return int
+ *   Memory limit in bytes, -1 if error.
+ */
+function sphinxsearch_get_memory_limit() {
+  if (!function_exists('memory_get_usage')) {
+    return -1;
+  }
+  $memory_limit = trim(@ini_get('memory_limit'));
+  if (is_numeric($memory_limit)) {
+    $memory_limit = (int)$memory_limit;
+  }
+  else {
+    if (!preg_match('#([0-9]+)(K|M|G)#', strtoupper($memory_limit), $matches)) {
+      return -1;
+    }
+    $memory_limit = (int)$matches[1];
+    switch ($matches[2]) {
+      case 'G':
+        $memory_limit *= 1024;
+      case 'M':
+        $memory_limit *= 1024;
+      case 'K':
+        $memory_limit *= 1024;
+    }
+  }
+  return $memory_limit;
+}
+
+/**
+ * Obtain list of node types that will be indexed.
+ *
+ * @return array
+ *   list of node types.
+ */
+function sphinxsearch_get_enabled_node_types() {
+  static $node_types;
+  if (!isset($node_types)) {
+    $node_types = array();
+    foreach (node_get_types() as $node_type) {
+      if (variable_get('sphinxsearch_include_node_type_'. $node_type->type, 0)) {
+        $node_types[] = $node_type->type;
+      }
+    }
+  }
+  return $node_types;
+}
+
+/**
+ * Build SQL condition for filtering nodes by enabled node types.
+ *
+ * @param string $table_alias
+ *   Table alias. Empty by default. Tipical alias for node table is 'n'.
+ * @return string
+ *   SQL condition.
+ */
+function sphinxsearch_get_enabled_node_types_condition($table_alias = '') {
+  static $condition;
+  if (!isset($condition)) {
+    $condition = '';
+    $sphinxsearch_enabled_node_types = sphinxsearch_get_enabled_node_types();
+    if (!empty($sphinxsearch_enabled_node_types)) {
+      $sphinxsearch_enabled_node_types_count = count($sphinxsearch_enabled_node_types);
+      if ($sphinxsearch_enabled_node_types_count == 1) {
+        $condition .= '= \'%s\'';
+      }
+      else {
+        $types = array();
+        foreach ($sphinxsearch_enabled_node_types as $type) {
+          $types[] = "'". db_escape_string($type) ."'";
+        }
+        $condition .= 'IN ('. implode(', ', $types) .')';
+      }
+    }
+  }
+  if (empty($condition)) {
+    return '';
+  }
+  return (!empty($table_alias) ? $table_alias .'.' : '') .'type '. $condition;
+}
+
+/**
+ * Initialize content type -vs- unique numeric ids table.
+ *
+ * This array is used to convert node types as string to
+ * numeric identifiers, so this data can be stored in
+ * Sphinx indexes as simple uint attributes.
+ *
+ * This array is initialized by xmlpipe/init request.
+ */
+function sphinxsearch_reset_node_type_ids() {
+  variable_set('sphinxsearch_node_type_ids', array(''));
+}
+
+/**
+ * Get a unique numeric ID for the given node type.
+ */
+function sphinxsearch_get_node_type_id($type) {
+  static $node_type_ids;
+  if (!isset($node_type_ids)) {
+    $node_type_ids = variable_get('sphinxsearch_node_type_ids', array(''));
+  }
+  if (!in_array($type, $node_type_ids)) {
+    $node_type_ids[] = $type;
+    variable_set('sphinxsearch_node_type_ids', $node_type_ids);
+  }
+  return (int)array_search($type, $node_type_ids);
+}
+
+/**
+ * Instatiate a Sphinx search client object.
+ *
+ * @return object
+ *   SphinxClient global instance.
+ */
+function &sphinxsearch_get_client() {
+  static $sphinxsearch;
+  if (!isset($sphinxsearch)) {
+    include_once(drupal_get_path('module', 'sphinxsearch') .'/lib/sphinxapi.php');
+    $sphinxsearch = new SphinxClient();
+    $sphinxsearch->SetServer(variable_get('sphinxsearch_searchd_host', 'localhost'), (int)variable_get('sphinxsearch_searchd_port', '3312'));
+    // Setup connection timeout?
+    if (($sphinxsearch_searchd_timeout = (int)variable_get('sphinxsearch_searchd_timeout', 0)) > 0) {
+      $sphinxsearch->SetConnectTimeout($sphinxsearch_searchd_timeout);
+    }
+    // Setup max query time?
+    if (($sphinxsearch_searchd_maxquerytime = (int)variable_get('sphinxsearch_searchd_maxquerytime', 0)) > 0) {
+      $sphinxsearch->SetMaxQueryTime($sphinxsearch_searchd_maxquerytime * 1000);
+    }
+    // Setup distributed retries?
+    if (($sphinxsearch_retries_count = (int)variable_get('sphinxsearch_retries_count', 0)) > 0) {
+      $sphinxsearch_retries_delay = (int)variable_get('sphinxsearch_retries_delay', 0);
+      $sphinxsearch->SetRetries($sphinxsearch_retries_count, $sphinxsearch_retries_delay * 1000);
+    }
+  }
+  return $sphinxsearch;
+}
+
+/**
+ * Obtain the text representation of a node.
+ * All HTML is removed.
+ *
+ * @param object reference $node
+ *   Node reference to extract text from.
+ * @return string
+ *   Rext representation of the node.
+ */
+function sphinxsearch_get_node_text(&$node) {
+  // Build the node body.
+  $node = node_build_content($node, FALSE, FALSE);
+  $node->body = drupal_render($node->content);
+
+  // Allow modules to modify the fully-built node.
+  node_invoke_nodeapi($node, 'alter');
+
+  $text = check_plain($node->title) ."\n". $node->body;
+
+  // Fetch extra data normally not visible
+  $extra = node_invoke_nodeapi($node, 'update index');
+  foreach ($extra as $t) {
+    $text .= $t;
+  }
+  unset($extra, $t);
+
+  // Strip control characters that aren't valid in xml.
+  // See http://www.w3.org/International/questions/qa-controls
+  $text = preg_replace('#[\\x00-\\x08\\x0B\\x0C\\x0E-\\x1F]#S', ' ', $text);
+
+  // Strip off all tags, but insert space before/after them to keep word boundaries.
+  $text = str_replace(array('<', '>', '[', ']'), array(' <', '> ', ' ', ' '), $text);
+  $text = preg_replace('#<(script|style)[^>]*>.*</\1>#', ' ', $text);
+  $text = strip_tags($text);
+
+  // Reduce size a little removing redudant spaces and line breaks.
+  $text = preg_replace("# +#", ' ', $text);
+  $text = preg_replace("#(\s*)\n+#", "\n", $text);
+
+  return $text;
+}
