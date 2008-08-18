@@ -1,5 +1,5 @@
 ================================================================================
-$Id: README-XMLPIPE.txt,v 1.3 2008/08/18 15:13:44 markuspetrux Exp $
+$Id: README-XMLPIPE.txt,v 1.1 2008/08/18 17:59:29 markuspetrux Exp $
 ================================================================================
 
 The sphinxsearch_scripts directory under the sphinxsearch module contains the
