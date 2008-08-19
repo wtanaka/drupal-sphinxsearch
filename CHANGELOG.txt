@@ -1,4 +1,15 @@
+2008-08-19 by markus_petrux at drupal.org, branched for Drupal 5.
+
+- Fixed typo in CSS.
+- Added method to check searchd daemon connection.
+- Enhanced user interface for searching.
+- Simplification of themable search results method.
+- Added missing option to setup XMLPipe to restart DB connection.
+- Added option to select size of excerpts in search results.
+
+
 2008-08-18 by markus_petrux at drupal.org, version not yet released.
+
 - Rewritten XMLPipe generator.
 - Created sphinxsearch_scripts subdirectory to host the main entry point for
   the XMLPipe generator. This subdirectory allows to isolate PHP settings
@@ -7,6 +18,7 @@
 
 
 2008-08-15 by markus_petrux at drupal.org, version not yet released.
+
 - Changed module name from sphinx to sphinxsearch.
   Please, see following issue for references on why there is another project
   called 'sphinx': http://drupal.org/node/296044

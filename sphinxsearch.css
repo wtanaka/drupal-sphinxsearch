@@ -1,4 +1,4 @@
-/* $Id: sphinxsearch.css,v 1.1 2008/08/18 13:51:28 markuspetrux Exp $ */
+/* $Id: sphinxsearch.css,v 1.2 2008/08/19 01:37:49 markuspetrux Exp $ */
 
 .search-form {
   margin-bottom: 1em;
@@ -40,6 +40,6 @@
 .search-results .search-keyword-match {
   font-weight: bold;
 }
-.search-results .search-chuck-separator {
+.search-results .search-chunk-separator {
   font-weight: normal;
 }

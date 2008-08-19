@@ -1,5 +1,5 @@
 <?php
-// $Id: sphinxsearch.pages.inc,v 1.1 2008/08/18 13:51:28 markuspetrux Exp $
+// $Id: sphinxsearch.pages.inc,v 1.2 2008/08/19 01:37:49 markuspetrux Exp $
 
 /**
  * @file
@@ -191,28 +191,21 @@ function sphinxsearch_search_data($keys = NULL, $search_options = array()) {
     $sphinxsearch->SetFilter('is_deleted', array(0));
     $results = $sphinxsearch->Query($keys, $sphinxsearch_query_index);
     if (!$results) {
-      if (user_access('administer sphinxsearch')) {
-        drupal_set_message($sphinxsearch->GetLastError(), 'error');
-      }
-      else {
-        drupal_set_message(t('Search service is disabled temporarily. Please, try later.'), 'error');
-        watchdog('sphinxsearch', t('Search failed: !message', array('!message' => $sphinxsearch->GetLastError())), WATCHDOG_WARNING);
+      sphinxsearch_ui_warning(t('Search failed: !message', array('!message' => $sphinxsearch->GetLastError())));
+      if (!sphinxsearch_check_connection()) {
+        drupal_set_message(t('Search service is disabled temporarily. Please, try again later.'), 'error');
       }
     }
     else {
       $results['query'] = $keys;
-      $warning = $sphinxsearch->GetLastWarning();
-      if (!empty($warning)) {
-        $warning = t('Warning: !warning', array('!warning' => $warning));
-        if (user_access('administer sphinxsearch')) {
-          drupal_set_message($warning, 'error');
-        }
-        else {
-          watchdog('sphinxsearch', $warning, WATCHDOG_WARNING);
-        }
+      $message = $sphinxsearch->GetLastWarning();
+      if (!empty($message)) {
+        sphinxsearch_ui_warning(t('Search query warning: !message', array('!message' => $message)));
       }
       if (!empty($results['matches'])) {
-        $output .= theme('sphinxsearch_search_results', $results);
+        $query_results = sphinxsearch_parse_query_results($results);
+        unset($results); // Free a little memory.
+        $output .= theme('sphinxsearch_search_results', $query_results);
       }
     }
   }
@@ -220,78 +213,115 @@ function sphinxsearch_search_data($keys = NULL, $search_options = array()) {
 }
 
 /**
- * Format the result page of a search query.
+ * Generate a UI warning.
+ *
+ * Displays the message if user has 'administer sphinxsearch' privilege.
+ * Otherwise, the warning is logged to watchdog.
+ *
+ * @param string $message
+ */
+function sphinxsearch_ui_warning($message) {
+  if (user_access('administer sphinxsearch')) {
+    drupal_set_message($message, 'error');
+  }
+  else {
+    watchdog('sphinxsearch', $message, WATCHDOG_WARNING);
+  }
+}
+
+/**
+ * Parse Sphinx query results into a format that can be easilly themed.
  *
  * @param array $results
- *   All search result as returned by Sphinx query.
+ *   All search results as returned by Sphinx query.
+ */
+function sphinxsearch_parse_query_results($results) {
+  $query_results = array(
+    'query' => $results['query'],
+    'total_found' => (int)$results['total_found'],
+    'total' => (int)$results['total'],
+    'time' => $results['time'],
+    'words' => $results['words'],
+    'nodes' => array(),
+    'titles' => array(),
+    'excerpts' => array(),
+  );
+
+  // Load nodes references by returned results.
+  foreach ($results['matches'] as $sphinx_docid => $sphinx_match) {
+    if (isset($sphinx_match['attrs']['nid']) && ($node = node_load($sphinx_match['attrs']['nid']))) {
+      $query_results['nodes'][] = $node;
+      $query_results['titles'][] = check_plain($node->title);
+      $query_results['excerpts'][] = sphinxsearch_get_node_text($node);
+    }
+  }
+
+  // Prepare Sphinx client API.
+  $sphinxsearch = sphinxsearch_get_client();
+  $sphinxsearch_excerpts_index = variable_get('sphinxsearch_excerpts_index', '');
+  $sphinxsearch_excerpts_limit = (int)variable_get('sphinxsearch_excerpts_limit', 256);
+
+  // Use Sphinx to build node titles with highlighted keywords.
+  $query_results['titles'] = $sphinxsearch->BuildExcerpts($query_results['titles'], $sphinxsearch_excerpts_index, $query_results['query'], array(
+    'before_match' => '<span class="search-keyword-match">',
+    'after_match' => '</span>',
+    'chunk_separator' => '',
+    'limit' => $sphinxsearch_excerpts_limit,
+    'around' => 100,
+    'exact_phrase' => FALSE,
+    'single_passage' => FALSE,
+  ));
+  if (!$query_results['titles']) {
+    sphinxsearch_ui_warning(t('Unable to build excerpts for node titles. Sphinx error: !message', array('!message' => $sphinxsearch->GetLastError())));
+  }
+
+  // Use Sphinx to build node excerpts with highlighted keywords.
+  $query_results['excerpts'] = $sphinxsearch->BuildExcerpts($query_results['excerpts'], $sphinxsearch_excerpts_index, $query_results['query'], array(
+    'before_match' => '<span class="search-keyword-match">',
+    'after_match' => '</span>',
+    'chunk_separator' => '<span class="search-chunk-separator"> ... </span>',
+    'limit' => $sphinxsearch_excerpts_limit,
+    'around' => 5,
+    'exact_phrase' => FALSE,
+    'single_passage' => FALSE,
+  ));
+  if (!$query_results['excerpts']) {
+    sphinxsearch_ui_warning(t('Unable to build excerpts for node snippets. Sphinx error: !message', array('!message' => $sphinxsearch->GetLastError())));
+  }
+
+  return $query_results;
+}
+
+/**
+ * Format the results page for the given query results array.
+ *
+ * @param array $query_results
+ *   All search results formatted for easilly theming.
+ *   @see sphinxsearch_parse_query_results()
  *
  * @ingroup themeable
  */
-function theme_sphinxsearch_search_results($results) {
+function theme_sphinxsearch_search_results($query_results) {
+  // Display information about query execution.
   $output = '<p>';
-  $output .= format_plural((int)$results['total_found'], '1 document found in', '@count documents found in') .' '. t('@seconds seconds.', array('@seconds' => round($results['time'], 3)));
-  if (!empty($results['words'])) {
+  $output .= format_plural($query_results['total_found'], '1 document found', '@count documents found') .' '. t('in @seconds seconds.', array('@seconds' => round($query_results['time'], 3)));
+  if (!empty($query_results['words'])) {
     $words = array();
-    foreach ($results['words'] as $word => $word_data) {
+    foreach ($query_results['words'] as $word => $word_data) {
       $words[] = '<em>'. check_plain($word) .'</em> ('. t('documents: @docs, hits: @hits', array('@docs' => (int)$word_data['docs'], '@hits' => (int)$word_data['hits'])) .')';
     }
     $output .= ' '. t('Terms found:') .' '. implode('; ', $words) .'.';
   }
   $output .= '</p>' ."\n";
-
-  $matched_nodes = array();
-  $titles = $excerpts = array();
-  foreach ($results['matches'] as $sphinx_docid => $sphinx_match) {
-    if (isset($sphinx_match['attrs']['nid']) && ($node = node_load($sphinx_match['attrs']['nid']))) {
-      $matched_nodes[] = $node;
-      $titles[] = check_plain($node->title);
-      $excerpts[] = sphinxsearch_get_node_text($node);
-    }
+  if ($query_results['total_found'] != $query_results['total']) {
+    drupal_set_message(t('Warning: only the first @count matches are displayed. You may wish to use additional filters to reduce the number of results.', array('@count' => $query_results['total'])), 'error');
   }
 
-  // Use Sphinx to build excerpts with highlighted keywords
-  $sphinxsearch = sphinxsearch_get_client();
-  $sphinxsearch_excerpts_index = variable_get('sphinxsearch_excerpts_index', '');
-  $excerpts = $sphinxsearch->BuildExcerpts($excerpts, $sphinxsearch_excerpts_index, $results['query'], array(
-    'before_match' => '<span class="search-keyword-match">',
-    'after_match' => '</span>',
-    'chunk_separator' => '<span class="search-chuck-separator"> ... </span>',
-    'limit' => 256,
-    'around' => 3,
-    'exact_phrase' => FALSE,
-    'single_passage' => FALSE,
-  ));
-  if (!$excerpts) {
-    drupal_set_message($sphinxsearch->GetLastError(), 'error');
-  }
-  $titles = $sphinxsearch->BuildExcerpts($titles, $sphinxsearch_excerpts_index, $results['query'], array(
-    'before_match' => '<span class="search-keyword-match">',
-    'after_match' => '</span>',
-    'chunk_separator' => '',
-    'limit' => 256,
-    'around' => 100,
-    'exact_phrase' => FALSE,
-    'single_passage' => FALSE,
-  ));
-  if (!$titles) {
-    drupal_set_message($sphinxsearch->GetLastError(), 'error');
-  }
-
-/*
-// Snippet that could be used to group results by term,
-// maybe to build tag cloud or something similar.
-$sphinxsearch_query_index = variable_get('sphinxsearch_query_index', '');
-$sphinxsearch->SetArrayResult(TRUE);
-$sphinxsearch->SetGroupBy('tid', SPH_GROUPBY_ATTR, '@count DESC');
-$rc = $sphinxsearch->Query($results['query'], $sphinxsearch_query_index);
-  foreach ($rc['matches'] as $sphinx_docid => $sphinx_match) {
-    print 'tid:'. $sphinx_match['attrs']['@groupby'] .', count:'. $sphinx_match['attrs']['@count'];
-  }
-//*/
-
-  $output .= '<dl class="search-results">';
-  foreach ($matched_nodes as $item_id => $node) {
-    $output .= ' <dt class="title"><a href="'. url('node/'. $node->nid) .'">'. (isset($titles[$item_id]) ? $titles[$item_id] : check_plain($node->title)) .'</a></dt>';
+  // Display list of formatted search results.
+  $output .= '<dl class="search-results">' ."\n";
+  foreach ($query_results['nodes'] as $item_id => $node) {
+    $title = (isset($query_results['titles'][$item_id]) ? $query_results['titles'][$item_id] : check_plain($node->title));
+    $output .= ' <dt class="title"><a href="'. url('node/'. $node->nid) .'">'. $title .'</a></dt>' ."\n";
     $info = array(
       theme('username', $node),
       format_date($node->created, 'small'),
@@ -300,10 +330,13 @@ $rc = $sphinxsearch->Query($results['query'], $sphinxsearch_query_index);
     if (!empty($extra) && is_array($extra)) {
       $info = array_merge($info, $extra);
     }
-    $output .= ' <dd>'. (isset($excerpts[$item_id]) ? '<p class="search-excerpt">'. $excerpts[$item_id] .'</p>' : '') .'<p class="search-info">'. implode(' - ', $info) .'</p></dd>';
+    $excerpt = (isset($query_results['excerpts'][$item_id]) ? '<p class="search-excerpt">'. $query_results['excerpts'][$item_id] .'</p>' ."\n" : '');
+    $output .= '<dd>'. $excerpt .'<p class="search-info">'. implode(' - ', $info) .'</p></dd>' ."\n";
   }
-  $output .= '</dl>';
-  $output .= sphinxsearch_pager($results);
+  $output .= '</dl>' ."\n";
+
+  // Display pager.
+  $output .= sphinxsearch_pager($query_results['total']);
   return $output;
 }
 
@@ -321,14 +354,13 @@ function sphinxsearch_search_get_current_page() {
 /**
  * Compute pager options and invoke theme pager.
  *
- * @param array $results
- *   All search result as returned by Sphinx query.
+ * @param int $results_total
+ *   Total number of returned search results.
  *
  * @return string
  */
-function sphinxsearch_pager($results) {
+function sphinxsearch_pager($results_total) {
   $results_per_page = (int)variable_get('sphinxsearch_results_per_page', 10);
-  $results_total = (int)$results['total_found'];
   $pager_element = 0;
   $GLOBALS['pager_page_array'] = explode(',', $_GET['page']);
   $GLOBALS['pager_total_items'][$pager_element] = $results_total;

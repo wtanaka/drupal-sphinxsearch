@@ -1,5 +1,5 @@
 <?php
-// $Id: sphinxsearch.xmlpipe.inc,v 1.1 2008/08/18 13:51:28 markuspetrux Exp $
+// $Id: sphinxsearch.xmlpipe.inc,v 1.2 2008/08/19 01:37:49 markuspetrux Exp $
 
 /**
  * @file
@@ -111,13 +111,13 @@ function sphinxsearch_xmlpipe() {
 function sphinxsearch_generate_xmlpipe_main($main_index_id, $first_nid, $last_nid) {
   $range_start = $first_nid;
   $range_step = (int)variable_get('sphinxsearch_nodes_per_chunk', 0);
-  $loops_before_restart = 10;
-  $loops_counter = 0;
+  $chunks_before_restart = variable_get('sphinxsearch_chunks_before_restart', 0);
+  $chunks_counter = 0;
   $nodes_counter = 0;
 
   if ($range_step <= 0) {
     $range_step = ($last_nid - $first_nid) + 1;
-    $loops_before_restart = -1;
+    $chunks_before_restart = 0;
   }
 
   sphinxsearch_watchdog('sphinxsearch', t('XMLPipe processing for main index @main_index_id has started.<ul>
@@ -214,9 +214,9 @@ function sphinxsearch_generate_xmlpipe_main($main_index_id, $first_nid, $last_ni
     }
 
     // Need to restart DB connection?
-    if ($loops_before_restart > 0) {
-      $loops_counter++;
-      if ($loops_counter >= $loops_before_restart) {
+    if ($chunks_before_restart > 0) {
+      $chunks_counter++;
+      if ($chunks_counter >= $chunks_before_restart) {
         sphinxsearch_db_reconnect();
         $current_memory_bytes = memory_get_usage();
         $current_execution_time = time() - $GLOBALS['sphinx_start_execution_time'];
@@ -234,7 +234,7 @@ function sphinxsearch_generate_xmlpipe_main($main_index_id, $first_nid, $last_ni
           '@nodes_counter' => $nodes_counter,
           '@nodes_per_second' => ($current_execution_time > 0 ? round($nodes_counter / $current_execution_time, 2) : $nodes_counter),
         )), WATCHDOG_ERROR);
-        $loops_counter = 0;
+        $chunks_counter = 0;
       }
     }
   }
@@ -323,7 +323,7 @@ function sphinxsearch_generate_xmlpipe_delta() {
     exit;
   }
 
-  // Obtain limits currently stored on each main index.
+  // Obtain index boundaries currently stored on each main index.
   $query_keys = array('last_updated', 'first_nid', 'last_nid');
   foreach ($main_indexes_info as $main_index_id => $main_index_info) {
     // Reset query internals for current main index.
