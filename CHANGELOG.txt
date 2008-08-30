@@ -1,4 +1,96 @@
-2008-08-19 by markus_petrux at drupal.org, branched for Drupal 5.
+================================================================================
+$Id: CHANGELOG.txt,v 1.3 2008/08/30 06:53:31 markuspetrux Exp $
+================================================================================
+
+--------------------------------------------------------------------------------
+2008-08-29, tag: 5.x-1.0 release
+
+- Removed configuration option for Sphinx document ids offset. I was confused
+  by a big notice in the Sphinx manual stating that document ids should be
+  unique, stop. The scope of such a restriction has been clarified by shodan,
+  here: http://www.sphinxsearch.com/forum/view.html?id=2139#10402  :)
+  It is required to run Drupal update.php and to rebuild all your indexes as
+  soon as the module files have been updated!
+  Sorry, for such a change at this point, though this is something that should
+  be addressed as soon as possible.
+- Fix sphinxsearch_get_client() usage (missing ampersand operator, oops).
+- Added node type conversion when parsing grouping results by node type.
+- Added node tags in search results (theme).
+- Added support for author and content type tagadelic/faceted search.
+
+--------------------------------------------------------------------------------
+2008-08-27, tag: 5.x-1.0-RC1
+
+- Added faceted search support. Faceted search block is rendered only under the
+  context of search page.
+- Decode commas for query string stored along watchdog report for searches.
+- Added $debug argument to sphinxsearch_execute_query (developer use only).
+- Fix reentrancy issues in sphinxsearch_execute_query (reset filters, etc.).
+- Fix SetFilter() usage for content type and taxonomies.
+- Fix undefined notice in sphinxsearch_get_current_page().
+- Changed name of tagadelic block variables (run Drupal update.php to apply).
+- Fix node text for xmlpipe document (title was indexed as part of the body).
+- Moving taxonomy related functions to a separate file. Reduce xmlpipe memory
+  requirements when taxonomy module is not installed.
+- Added tagadelic alike pages.
+
+--------------------------------------------------------------------------------
+2008-08-26, tag: 5.x-1.0-BETA1
+
+- Storing a number of common functions into a separate file.
+- Removed keys from search path. It all is based on query string.
+- Added option in module settings to select search page path.
+- Added options in module settings to customize excerpts for search results.
+- Added a check connection page to help us diagnose configuration issues.
+- Changed XMLPipe document, again. We now store the vids. All existing indexes
+  get invalidated and need to be rebuilt.
+- Refactored almost everything related to the search form, so it now becomes a
+  bit more modular.
+- Added basic tagadelic support. There is a single block with options to set
+  number of tags, levels and sort order.
+
+--------------------------------------------------------------------------------
+2008-08-23, getting close to beta stage.
+
+- Removed changed attribute from XMLPipe indexes, added created attribute.
+- Added sort options (keywords relevance, node created, last updated time).
+- Changed internals of search page. Reusable components. This opens the door
+  to create custom search pages and more. It might not be ready, but I started
+  to see the light on how to build a framework from here to take advantage of
+  Sphinx speed and features.
+- Started to add tagadelic alike blocks. Not finished yet.
+
+--------------------------------------------------------------------------------
+2008-08-22, not yet released.
+
+- Added support for indexing and filtering taxonomies. Note that this change
+  invalidates indexes created previously. If you installed this module before,
+  then you should check new module settings and rebuild all your indexes again.
+- preopen_indexes value in contrib/sphinx.conf is now set to 1, this is to
+  minimize race conditions between XMLPipe generator and concurrent queries.
+- Added link to search syntax page from admin settings panel.
+- Hide content type filter in advanced search panel if only one content type
+  has been enabled. Remove unnecessary clutter from user interface.
+- Fixed a few more typos and documentation issues here and there.
+- Removed options to select search matching modes. Not really necessary. Now,
+  available modes are just All, Any and Phrase. Using Sphinx Extended2 mode.
+
+--------------------------------------------------------------------------------
+2008-08-21, not yet released.
+
+- Added "more information about search options" link to advanced search panel.
+- A few changes in module settings panel.
+
+--------------------------------------------------------------------------------
+2008-08-20, not yet released.
+
+- Added module settings to enable advanced matching modes.
+- Added selection of matching mode in advanced search fieldset.
+- Advanced search fieldset opened only by default when no results are obtained.
+- Revised help texts.
+
+--------------------------------------------------------------------------------
+2008-08-19, branched for Drupal 5.
 
 - Fixed typo in CSS.
 - Added method to check searchd daemon connection.
@@ -7,8 +99,8 @@
 - Added missing option to setup XMLPipe to restart DB connection.
 - Added option to select size of excerpts in search results.
 
-
-2008-08-18 by markus_petrux at drupal.org, version not yet released.
+--------------------------------------------------------------------------------
+2008-08-18, version not even alpha.
 
 - Rewritten XMLPipe generator.
 - Created sphinxsearch_scripts subdirectory to host the main entry point for
@@ -16,15 +108,15 @@
   in .htaccess file that might be required to adjust memory_limit, etc.
 - Updated documentation in README.txt and contrib subdirectory.
 
-
-2008-08-15 by markus_petrux at drupal.org, version not yet released.
+--------------------------------------------------------------------------------
+2008-08-15, version not even alpha.
 
 - Changed module name from sphinx to sphinxsearch.
   Please, see following issue for references on why there is another project
   called 'sphinx': http://drupal.org/node/296044
 
-
-2008-07-30 by markus_petrux at drupal.org, version not yet released.
+--------------------------------------------------------------------------------
+2008-07-30, version not even alpha.
 
 - Moved Sphinx client class script to lib subdirectory.
 - Added is_deleted attribute (boolean, default 0) to XMLPipe structure.
@@ -35,3 +127,26 @@
 - Fixed query arguments returned by sphinx_search_form_submit().
 - Added sample logrotate configuration script in contrib folder.
 - A few changes/improvements in contrib/sphinx script.
+
+--------------------------------------------------------------------------------
+2008-07-16, Started to work on this project.
+
+- It all started after reading a lot around Sphinx for Drupal (phpBB and other
+  projects), and even looking and testing Solr and Xapian. Sphinx was looking
+  nice and seemed to be more powerfull for our needs, and there was a PHP4
+  compatible API to work with, which is something we still need for a while. At
+  the same time I had to resolve a few performance issues caused by our current
+  search backends, based on MySQL queries. That was something that was in the
+  TODO list for ages. However, Sphinx now started to look the solution, so I
+  started to play with it. After a while, I realised it was necessary to find a
+  method to bypass the need to build complex queries for Sphinx sources, it was
+  going to be a lot easier to use XMLPipe. The problem then was more about
+  performance, optimization, PHP memory_limits, max_execution_time, scalability,
+  etc. but if it was possible to built a reasonable method to implement Sphinx
+  for Drupal content, then it was going to be really great...
+  Then I started to share my thoughts at g.d.o, then I shared a module with the
+  d.o infra mailing list (eventhough it was early code, it covered XMLPipe and
+  search user interface), then someone else looked interested in it, then...
+  well, here we are. I need this module to solve a few of our problems now with
+  D5, and in the near future with D6... it is nice and encouraging to do it in
+  a way that this effort can be shared and reused by others.

@@ -1,5 +1,8 @@
-/* $Id: sphinxsearch.css,v 1.2 2008/08/19 01:37:49 markuspetrux Exp $ */
+/* $Id: sphinxsearch.css,v 1.3 2008/08/30 06:53:31 markuspetrux Exp $ */
 
+/**
+ * Search form.
+ */
 .search-form {
   margin-bottom: 1em;
 }
@@ -13,19 +16,6 @@
   margin-top: 0;
   margin-bottom: 0;
 }
-.search-results p {
-  margin-top: 0;
-}
-.search-results dt {
-  font-size: 1.1em;
-}
-.search-results dd {
-  margin-bottom: 1em;
-}
-.search-results .search-info {
-  margin-top: 0;
-  font-size: 0.85em;
-}
 .search-advanced .criterion {
   float: left;
   margin-right: 2em;
@@ -34,12 +24,135 @@
   float: left;
   clear: left;
 }
-.search-results .search-excerpt {
+
+/**
+ * Search results.
+ */
+dl.search-results {
+  margin: 0.5em 0 1em 0.5em;
+}
+dl.search-results p {
+  margin-top: 0;
+}
+dl.search-results dt {
+  font-size: 1.1em;
+}
+dl.search-results dd {
+  margin-left: 1em;
+  margin-bottom: 1em;
+}
+dl.search-results .search-links {
+  margin: 0;
+  font-size: 0.85em;
+}
+dl.search-results .search-info {
+  margin-top: 0;
+  font-size: 0.85em;
+}
+dl.search-results .search-excerpt {
   margin-bottom: 0.2em;
 }
-.search-results .search-keyword-match {
+dl.search-results .search-keyword-match {
   font-weight: bold;
 }
-.search-results .search-chunk-separator {
+dl.search-results .search-chunk-separator {
   font-weight: normal;
+}
+
+/**
+ * Tagadelic (tag clouds).
+ */
+.tagadelic-page-block {
+  margin-bottom: 3em;
+}
+.tagadelic-wrapper {
+  text-align : justify;
+  margin-right: 0.5em;
+}
+.tagadelic-level1 {
+  font-size: 0.8em;
+  line-height: 1em;
+}
+.tagadelic-level2 {
+  font-size: 1em;
+  line-height: 1em;
+}
+.tagadelic-level3 {
+  font-size: 1.2em;
+  line-height: 1em;
+}
+.tagadelic-level4 {
+  font-size: 1.4em;
+  line-height: 1em;
+}
+.tagadelic-level5 {
+  font-size: 1.6em;
+  line-height: 1em;
+}
+.tagadelic-level6 {
+  font-size: 1.8em;
+  line-height: 1em;
+}
+.tagadelic-level7 {
+  font-size: 1.9em;
+  line-height: 1em;
+}
+.tagadelic-level8 {
+  font-size: 2em;
+  line-height: 1em;
+}
+.tagadelic-level9 {
+  font-size: 2.1em;
+  line-height: 1em;
+}
+.tagadelic-level10 {
+  font-size: 2.2em;
+  line-height: 1em;
+}
+.tagadelic-level11 {
+  font-size: 2.3em;
+  line-height: 1em;
+}
+.tagadelic-level12 {
+  font-size: 2.4em;
+  line-height: 1em;
+}
+.tagadelic-level13 {
+  font-size: 2.5em;
+  line-height: 1em;
+}
+.tagadelic-level14 {
+  font-size: 2.6em;
+  line-height: 1em;
+}
+.tagadelic-level15 {
+  font-size: 2.7em;
+  line-height: 1em;
+}
+.tagadelic-level16 {
+  font-size: 2.8em;
+  line-height: 1em;
+}
+
+/**
+ * Faceted search.
+ */
+.faceted-superset {
+  margin-bottom: 1.5em;
+}
+.faceted-superset .faceted-superset-lists {
+  font-size: 1em;
+}
+.faceted-superset h2 {
+  margin-bottom: 0.5em;
+  font-size: 1.2em;
+  font-weight: bold;
+}
+.faceted-vocabulary {
+  margin-bottom: 1.5em;
+}
+.faceted-vocabulary h2 {
+  margin-bottom: 0.5em;
+  font-size: 1.2em;
+  font-weight: bold;
 }

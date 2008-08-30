@@ -1,5 +1,5 @@
 <?php
-// $Id: sphinxsearch.module,v 1.3 2008/08/19 01:37:49 markuspetrux Exp $
+// $Id: sphinxsearch.module,v 1.4 2008/08/30 06:53:31 markuspetrux Exp $
 
 /**
  * @file
@@ -8,31 +8,20 @@
  */
 
 /**
- * Path for user search page.
- *
- * I think this one doesn't conflict with any other module out there.
- * Actually, this path may change in the future depending on how
- * Drupal integration of this module is finally approached.
- * Please, see README.txt and or check issue queue for this module.
- */
-define('SPHINXSEARCH_PATH_PREFIX', 'search-content');
-
-
-/**
  * Implementation of hook_help().
  */
 function sphinxsearch_help($section) {
   switch ($section) {
-    case 'admin/help#search':
-      $output = '<p>'. t('The Sphinx search module replaces Drupal search capabilities for searching content.') .'</p>';
+    case 'admin/help#sphinxsearch':
+      $output = '<p>'. t('Sphinx search module provides a fast and scalable alternative to Drupal core search for content. Sphinx search implementation is based on XMLPipe source type and support for main+delta index scheme.') .'</p>';
       return $output;
-    case 'admin/settings/search':
-      return '<p>'. t('You can adjust the settings below to tweak the Sphinx behaviour. It is recommended to install Sphinx on a separate machine. You also need to schedule index updates perioically. Index updates are processed by Sphinx indexer.') .'</p>';
-    case 'search#noresults':
-      return t('<ul>
-<li>Check if your spelling is correct.</li>
-<li>Remove quotes around phrases to match each word individually: <em>"blue smurf"</em> will match less than <em>blue smurf</em>.</li>
-<li>Consider loosening your query with <em>OR</em>: <em>blue smurf</em> will match less than <em>blue OR smurf</em>.</li>
+    case 'admin/settings/sphinxsearch':
+      return '<p>'. t('You can adjust the settings below to tweak the Sphinx behaviour.') .'</p>';
+    case 'sphinxsearch#noresults':
+      return t('Suggestions:<ul>
+<li>Make sure all words are spelled correctly.</li>
+<li>Try different or more general keywords.</li>
+<li>Consider using less restrictive filters.</li>
 </ul>');
   }
 }
@@ -49,30 +38,65 @@ function sphinxsearch_perm() {
  */
 function sphinxsearch_menu($may_cache) {
   $items = array();
+
+  $module_path = drupal_get_path('module', 'sphinxsearch');
+  require_once($module_path .'/sphinxsearch.common.inc');
+  require_once($module_path .'/sphinxsearch.taxonomy.inc');
+
   if ($may_cache) {
+    $admin_access = user_access('administer sphinxsearch');
+    $usage_access = user_access('use sphinxsearch');
     $items[] = array(
       'path' => 'admin/settings/sphinxsearch',
-      'title' => t('Sphinx search settings'),
-      'description' => t('Administer Sphinx search module settings'),
+      'title' => t('Sphinx search'),
       'callback' => 'drupal_get_form',
       'callback arguments' => 'sphinxsearch_settings',
-      'access' => user_access('administer sphinxsearch'),
+      'access' => $admin_access,
     );
     $items[] = array(
-      'path' => SPHINXSEARCH_PATH_PREFIX,
+      'path' => 'admin/settings/sphinxsearch/settings',
+      'title' => t('Settings'),
+      'description' => t('Administer Sphinx search module settings'),
+      'access' => $admin_access,
+      'weight' => -10,
+      'type' => MENU_DEFAULT_LOCAL_TASK,
+    );
+    $items[] = array(
+      'path' => 'admin/settings/sphinxsearch/check-connection',
+      'title' => t('Check connection'),
+      'description' => t('Check connection to Sphinx searchd daemon'),
+      'callback' => 'sphinxsearch_check_connection_page',
+      'access' => $admin_access,
+      'weight' => 10,
+      'type' => MENU_LOCAL_TASK,
+    );
+    $items[] = array(
+      'path' => sphinxsearch_get_search_path(),
       'title' => t('Search'),
       'callback' => 'sphinxsearch_search_page',
-      'access' => user_access('use sphinxsearch'),
+      'access' => $usage_access,
       'type' => MENU_SUGGESTED_ITEM,
     );
+    if (module_exists('taxonomy') && !module_exists('tagadelic')) {
+      $items[] = array(
+        'title' => t('Tags'),
+        'path' => 'tagadelic',
+        'callback' => 'sphinxsearch_tagadelic_page',
+        'access' => $usage_access,
+        'type' => MENU_SUGGESTED_ITEM,
+      );
+    }
   }
   else {
     if (arg(0) == 'admin' && arg(1) == 'settings' && arg(2) == 'sphinxsearch') {
-      include_once(drupal_get_path('module', 'sphinxsearch') .'/sphinxsearch.admin.inc');
+      require_once($module_path .'/sphinxsearch.admin.inc');
     }
-    else if (arg(0) == SPHINXSEARCH_PATH_PREFIX) {
-      include_once(drupal_get_path('module', 'sphinxsearch') .'/sphinxsearch.pages.inc');
+    else if (sphinxsearch_is_search_path()) {
+      require_once($module_path .'/sphinxsearch.pages.inc');
     }
+
+    // We need our own CSS in all pages because of tagadelic and similar blocks.
+    drupal_add_css($module_path .'/sphinxsearch.css');
   }
   return $items;
 }
@@ -80,21 +104,132 @@ function sphinxsearch_menu($may_cache) {
 /**
  * Implementation of hook_block().
  */
-function sphinxsearch_block($op = 'list', $delta = 0) {
+function sphinxsearch_block($op = 'list', $delta = 0, $edit = array()) {
   if ($op == 'list') {
-    return array(
-      array('info' => t('Sphinx search box')),
+    $blocks = array(
+      'searchbox' => array('info' => t('Sphinx search box')),
     );
+    if (module_exists('taxonomy')) {
+      foreach (sphinxsearch_get_enabled_vocabularies() as $vid => $vocabulary) {
+        $blocks['tags'. $vid] = array('info' => t('Sphinx tags in @vocabulary', array('@vocabulary' => $vocabulary->name)));
+      }
+      $blocks['faceted'] = array('info' => t('Sphinx faceted search'));
+    }
+    return $blocks;
+  }
+  else if ($op == 'configure') {
+    if ($delta != 'searchbox') {
+      if (preg_match('#^(faceted|tags([0-9]+))$#', $delta, $match)) {
+        $vid = (isset($match[2]) ? (int)$match[2] : 0);
+        $blockmode = ($match[1] == 'faceted' ? 'faceted' : 'tagadelic');
+        $vocabularies = sphinxsearch_get_enabled_vocabularies();
+        if ($blockmode == 'faceted' || ($blockmode == 'tagadelic' && isset($vocabularies[$vid]))) {
+          $suffix = ($blockmode == 'tagadelic' ? '_'. $vid : '');
+          $form['sortmode'] = array(
+            '#type' => 'radios',
+            '#title' => t('Tagadelic sort order'),
+            '#options' => array(
+              'weight,asc' => t('by weight, ascending'),
+              'weight,desc' => t('by weight, descending'),
+              'title,asc' => t('by title, ascending'),
+              'title,desc' => t('by title, descending'),
+              'random,none' => t('random')
+            ),
+            '#default_value' => variable_get('sphinxsearch_block_'. $blockmode .'_sortmode'. $suffix, 'title,asc'),
+            '#description' => t('Determines the sort order of the tags in the cloud.'),
+          );
+          $form['tags'] = array(
+            '#type' => 'select',
+            '#title' => t('Tags to show'),
+            '#options' => drupal_map_assoc(array(5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 60, 70, 80, 90, 100)),
+            '#default_value' => variable_get('sphinxsearch_block_'. $blockmode .'_tags'. $suffix, 20),
+            '#description' => t('The number of tags to show in this block.'),
+          );
+          $form['levels'] = array(
+            '#type' => 'select',
+            '#title' => t('Number of levels'),
+            '#options' => drupal_map_assoc(array(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16)),
+            '#default_value' => variable_get('sphinxsearch_block_'. $blockmode .'_levels'. $suffix, 10),
+            '#description' => t('The number of levels between the least popular tags and the most popular ones. Different levels will be assigned a different class to be themed (see <code>sphinxsearch.css</code>).'),
+          );
+          return $form;
+        }
+      }
+    }
+  }
+  else if ($op == 'save') {
+    if ($delta != 'searchbox') {
+      if (preg_match('#^(faceted|tags([0-9]+))$#', $delta, $match)) {
+        $vid = (isset($match[2]) ? (int)$match[2] : 0);
+        $blockmode = ($match[1] == 'faceted' ? 'faceted' : 'tagadelic');
+        $vocabularies = sphinxsearch_get_enabled_vocabularies();
+        if ($blockmode == 'faceted' || ($blockmode == 'tagadelic' && isset($vocabularies[$vid]))) {
+          $suffix = ($blockmode == 'tagadelic' ? '_'. $vid : '');
+          variable_set('sphinxsearch_block_'. $blockmode .'_sortmode'. $suffix, $edit['sortmode']);
+          variable_set('sphinxsearch_block_'. $blockmode .'_tags'. $suffix, $edit['tags']);
+          variable_set('sphinxsearch_block_'. $blockmode .'_levels'. $suffix, $edit['levels']);
+        }
+      }
+    }
   }
   else if ($op == 'view' && user_access('use sphinxsearch')) {
-    return array(
-      'subject' => t('Search'),
-      'content' => drupal_get_form('sphinxsearch_search_box'),
-    );
+    if ($delta == 'searchbox') {
+      // Hide block if current page is search.
+      if (!sphinxsearch_is_search_path()) {
+        return array(
+          'subject' => t('Search'),
+          'content' => drupal_get_form('sphinxsearch_search_box'),
+        );
+      }
+    }
+    else {
+      if (preg_match('#^(faceted|tags([0-9]+))$#', $delta, $match)) {
+        $vid = (isset($match[2]) ? (int)$match[2] : 0);
+        $blockmode = ($match[1] == 'faceted' ? 'faceted' : 'tagadelic');
+        if ($blockmode == 'tagadelic') {
+          // Tagadelic box for selected vocabulary.
+          $vocabularies = sphinxsearch_get_enabled_vocabularies();
+          if (isset($vocabularies[$vid])) {
+            $tags = sphinxsearch_tagadelic_build_data(array('type' => 'taxonomy', 'vid' => $vid),
+              (int)variable_get('sphinxsearch_block_tagadelic_tags_'. $vid, 20),
+              (int)variable_get('sphinxsearch_block_tagadelic_levels_'. $vid, 10),
+              variable_get('sphinxsearch_block_tagadelic_sortmode_'. $vid, 'title,asc')
+            );
+            if (!empty($tags)) {
+              $content = theme('sphinxsearch_tagadelic_block', $tags);
+              if (variable_get('sphinxsearch_page_tagadelic_tags', 100) > variable_get('sphinxsearch_block_tagadelic_tags_'. $vid, 20)) {
+                $content .= theme('sphinxsearch_tagadelic_more', $vid);
+              }
+              return array('content' => $content, 'subject' => t('Tags in @vocabulary', array('@vocabulary' => $vocabularies[$vid]->name)));
+            }
+          }
+        }
+        else if ($blockmode == 'faceted') {
+          // Faceted search box for all supported grouping methods.
+          // Rendered only within the context of search pages.
+          if (sphinxsearch_is_search_path()) {
+            $facets = sphinxsearch_faceted_build_data(
+              (int)variable_get('sphinxsearch_block_faceted_tags', 20),
+              (int)variable_get('sphinxsearch_block_faceted_levels', 10),
+              variable_get('sphinxsearch_block_faceted_sortmode', 'title,asc')
+            );
+            if (!empty($facets)) {
+              $content = theme('sphinxsearch_faceted_block', $facets);
+              return array('content' => $content, 'subject' => t('Faceted search'));
+            }
+          }
+        }
+      }
+    }
   }
 }
+
+/**
+ * Render a search box form.
+ */
 function sphinxsearch_search_box() {
   $form = array();
+  // Build basic search box form.
   $form['inline'] = array('#prefix' => '<div class="container-inline">', '#suffix' => '</div>');
   $form['inline']['keys'] = array(
     '#type' => 'textfield',
@@ -103,17 +238,21 @@ function sphinxsearch_search_box() {
     '#attributes' => array('title' => t('Enter the terms you wish to search for.')),
   );
   $form['inline']['submit'] = array('#type' => 'submit', '#value' => t('Search'));
-  $form['#action'] = url(SPHINXSEARCH_PATH_PREFIX);
+  $form['#action'] = url(sphinxsearch_get_search_path());
   return $form;
 }
+
+/**
+ * Process a search box form submission.
+ */
 function sphinxsearch_search_box_submit($form_id, $form_values) {
-  $return_path = SPHINXSEARCH_PATH_PREFIX;
-  // Remove redundant whitespaces.
+  $query = array();
   $keys = preg_replace('#\s+#', ' ', trim($form_values['keys']));
   if (!empty($keys)) {
-    $return_path .= '/'. $keys;
+    $query['keys'] = $keys;
   }
-  return $return_path;
+  // Transform POST into a GET request.
+  sphinxsearch_goto_search($query);
 }
 
 /**
@@ -122,8 +261,8 @@ function sphinxsearch_search_box_submit($form_id, $form_values) {
 function sphinxsearch_nodeapi(&$node, $op, $a3 = NULL, $a4 = NULL) {
   if ($op == 'delete') {
     // Update Sphinx documents when node is deleted.
-    $sphinxsearch_enabled_node_types = sphinxsearch_get_enabled_node_types();
-    if (empty($sphinxsearch_enabled_node_types) || in_array($node->type, $sphinxsearch_enabled_node_types)) {
+    $enabled_node_types = sphinxsearch_get_enabled_node_types();
+    if (empty($enabled_node_types) || in_array($node->type, $enabled_node_types)) {
       sphinxsearch_delete_node_from_index($node->nid);
     }
   }
@@ -143,16 +282,13 @@ function sphinxsearch_nodeapi(&$node, $op, $a3 = NULL, $a4 = NULL) {
  */
 function sphinxsearch_delete_node_from_index($nid) {
   $sphinxsearch_query_index = variable_get('sphinxsearch_query_index', '');
-  $sphinxsearch_docid_offset = (int)variable_get('sphinxsearch_docid_offset', 0);
-  $sphinxsearch = sphinxsearch_get_client();
+  $sphinxsearch = &sphinxsearch_get_client();
 
-  $count = $sphinxsearch->UpdateAttributes($sphinxsearch_query_index, array('is_deleted'), array(
-    ($nid + $sphinxsearch_docid_offset) => array(1)
-  ));
+  $count = $sphinxsearch->UpdateAttributes($sphinxsearch_query_index, array('is_deleted'), array($nid => array(1)));
 
   // Note: count should be number of updated documents, -1 if error.
   if ($count <= 0) {
-    watchdog('sphinxsearch', t('Node @nid could not be deleted from Sphinx index. Last Sphinx Error: !message', array(
+    watchdog('sphinxsearch', t('Node @nid could not be deleted from Sphinx index. Sphinx error message: !message', array(
       '@nid' => $nid,
       '!message' => $sphinxsearch->GetLastError()
     )), WATCHDOG_WARNING);
@@ -194,7 +330,88 @@ function sphinxsearch_get_memory_limit() {
 }
 
 /**
- * Obtain list of node types that will be indexed.
+ * Obtain the text representation of a node.
+ * All HTML is removed.
+ *
+ * @param object reference $node
+ *   Node reference to extract text from.
+ * @return string
+ *   Text representation of the node.
+ */
+function sphinxsearch_get_node_text(&$node) {
+  // Build the node body.
+  $node = node_build_content($node, FALSE, FALSE);
+  $node->body = drupal_render($node->content);
+
+  // Allow modules to modify the fully-built node.
+  node_invoke_nodeapi($node, 'alter');
+
+  $text = $node->body;
+
+  // Fetch extra data normally not visible
+  $extra = node_invoke_nodeapi($node, 'update index');
+  foreach ($extra as $t) {
+    $text .= $t;
+  }
+  unset($extra, $t);
+
+  // Strip control characters that aren't valid in xml.
+  // See http://www.w3.org/International/questions/qa-controls
+  $text = preg_replace('#[\\x00-\\x08\\x0B\\x0C\\x0E-\\x1F]#S', ' ', $text);
+
+  // Strip off all tags, but insert space before/after them to keep word boundaries.
+  $text = str_replace(array('<', '>', '[', ']'), array(' <', '> ', ' ', ' '), $text);
+  $text = preg_replace('#<(script|style)[^>]*>.*</\1>#', ' ', $text);
+  $text = strip_tags($text);
+
+  // Reduce size a little removing redudant spaces and line breaks.
+  $text = preg_replace("# +#", ' ', $text);
+  $text = preg_replace("#(\s*)\n+#", "\n", $text);
+
+  return $text;
+}
+
+/**
+ * Get a unique numeric ID for the given node type (XMLPipe documents).
+ * Note: Used to convert content types to and from Sphinx attributes.
+ *
+ * @param string $op
+ *   'id', 'name' or 'reset'.
+ * @param mixed $type
+ *   string  When $op == 'id'.
+ *   int     When $op == 'name'.
+ * @return mixed
+ *   int     When $op == 'id'.
+ *   string  When $op == 'name'.
+ *   TRUE    When $op == 'reset'.
+ *   FALSE   Not found
+ */
+function sphinxsearch_xmlpipe_nodetype($op, $type = '') {
+  static $node_type_ids;
+  if (!isset($node_type_ids)) {
+    $node_type_ids = variable_get('sphinxsearch_node_type_ids', array(''));
+  }
+  if ($op == 'id') {
+    if (!in_array($type, $node_type_ids)) {
+      $node_type_ids[] = $type;
+      variable_set('sphinxsearch_node_type_ids', $node_type_ids);
+    }
+    return (int)array_search($type, $node_type_ids);
+  }
+  else if ($op == 'name') {
+    if (isset($node_type_ids[$type])) {
+      return $node_type_ids[$type];
+    }
+  }
+  else if ($op == 'reset') {
+    variable_set('sphinxsearch_node_type_ids', array(''));
+    return TRUE;
+  }
+  return FALSE;
+}
+
+/**
+ * Obtain list of node types enabled to be indexed.
  *
  * @return array
  *   list of node types.
@@ -224,15 +441,14 @@ function sphinxsearch_get_enabled_node_types_condition($table_alias = '') {
   static $condition;
   if (!isset($condition)) {
     $condition = '';
-    $sphinxsearch_enabled_node_types = sphinxsearch_get_enabled_node_types();
-    if (!empty($sphinxsearch_enabled_node_types)) {
-      $sphinxsearch_enabled_node_types_count = count($sphinxsearch_enabled_node_types);
-      if ($sphinxsearch_enabled_node_types_count == 1) {
+    $enabled_node_types = sphinxsearch_get_enabled_node_types();
+    if (!empty($enabled_node_types)) {
+      if (count($enabled_node_types) == 1) {
         $condition .= '= \'%s\'';
       }
       else {
         $types = array();
-        foreach ($sphinxsearch_enabled_node_types as $type) {
+        foreach ($enabled_node_types as $type) {
           $types[] = "'". db_escape_string($type) ."'";
         }
         $condition .= 'IN ('. implode(', ', $types) .')';
@@ -243,114 +459,4 @@ function sphinxsearch_get_enabled_node_types_condition($table_alias = '') {
     return '';
   }
   return (!empty($table_alias) ? $table_alias .'.' : '') .'type '. $condition;
-}
-
-/**
- * Initialize content type -vs- unique numeric ids table.
- *
- * This array is used to convert node types as string to
- * numeric identifiers, so this data can be stored in
- * Sphinx indexes as simple uint attributes.
- */
-function sphinxsearch_reset_node_type_ids() {
-  variable_set('sphinxsearch_node_type_ids', array(''));
-}
-
-/**
- * Get a unique numeric ID for the given node type.
- */
-function sphinxsearch_get_node_type_id($type) {
-  static $node_type_ids;
-  if (!isset($node_type_ids)) {
-    $node_type_ids = variable_get('sphinxsearch_node_type_ids', array(''));
-  }
-  if (!in_array($type, $node_type_ids)) {
-    $node_type_ids[] = $type;
-    variable_set('sphinxsearch_node_type_ids', $node_type_ids);
-  }
-  return (int)array_search($type, $node_type_ids);
-}
-
-/**
- * Instatiate a Sphinx search client object.
- *
- * @return object
- *   SphinxClient global instance.
- */
-function &sphinxsearch_get_client() {
-  static $sphinxsearch;
-  if (!isset($sphinxsearch)) {
-    include_once(drupal_get_path('module', 'sphinxsearch') .'/lib/sphinxapi.php');
-    $sphinxsearch = new SphinxClient();
-    $sphinxsearch->SetServer(variable_get('sphinxsearch_searchd_host', 'localhost'), (int)variable_get('sphinxsearch_searchd_port', '3312'));
-
-    // Setup connection timeout?
-    if (($sphinxsearch_searchd_timeout = (int)variable_get('sphinxsearch_searchd_timeout', 0)) > 0) {
-      $sphinxsearch->SetConnectTimeout($sphinxsearch_searchd_timeout);
-    }
-
-    // Setup max query time?
-    if (($sphinxsearch_searchd_maxquerytime = (int)variable_get('sphinxsearch_searchd_maxquerytime', 0)) > 0) {
-      $sphinxsearch->SetMaxQueryTime($sphinxsearch_searchd_maxquerytime * 1000);
-    }
-
-    // Setup distributed retries?
-    if (($sphinxsearch_retries_count = (int)variable_get('sphinxsearch_retries_count', 0)) > 0) {
-      $sphinxsearch_retries_delay = (int)variable_get('sphinxsearch_retries_delay', 0);
-      $sphinxsearch->SetRetries($sphinxsearch_retries_count, $sphinxsearch_retries_delay * 1000);
-    }
-  }
-  return $sphinxsearch;
-}
-
-/**
- * Check connection with Sphinx searchd daemon.
- *
- * @return boolean
- */
-function sphinxsearch_check_connection() {
-  $sphinxsearch = sphinxsearch_get_client();
-  return $sphinxsearch->_Connect() ? TRUE : FALSE;
-}
-
-/**
- * Obtain the text representation of a node.
- * All HTML is removed.
- *
- * @param object reference $node
- *   Node reference to extract text from.
- * @return string
- *   Text representation of the node.
- */
-function sphinxsearch_get_node_text(&$node) {
-  // Build the node body.
-  $node = node_build_content($node, FALSE, FALSE);
-  $node->body = drupal_render($node->content);
-
-  // Allow modules to modify the fully-built node.
-  node_invoke_nodeapi($node, 'alter');
-
-  $text = check_plain($node->title) ."\n". $node->body;
-
-  // Fetch extra data normally not visible
-  $extra = node_invoke_nodeapi($node, 'update index');
-  foreach ($extra as $t) {
-    $text .= $t;
-  }
-  unset($extra, $t);
-
-  // Strip control characters that aren't valid in xml.
-  // See http://www.w3.org/International/questions/qa-controls
-  $text = preg_replace('#[\\x00-\\x08\\x0B\\x0C\\x0E-\\x1F]#S', ' ', $text);
-
-  // Strip off all tags, but insert space before/after them to keep word boundaries.
-  $text = str_replace(array('<', '>', '[', ']'), array(' <', '> ', ' ', ' '), $text);
-  $text = preg_replace('#<(script|style)[^>]*>.*</\1>#', ' ', $text);
-  $text = strip_tags($text);
-
-  // Reduce size a little removing redudant spaces and line breaks.
-  $text = preg_replace("# +#", ' ', $text);
-  $text = preg_replace("#(\s*)\n+#", "\n", $text);
-
-  return $text;
 }

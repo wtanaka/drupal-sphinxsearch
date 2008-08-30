@@ -1,5 +1,5 @@
 <?php
-// $Id: sphinxsearch.xmlpipe.inc,v 1.2 2008/08/19 01:37:49 markuspetrux Exp $
+// $Id: sphinxsearch.xmlpipe.inc,v 1.3 2008/08/30 06:53:31 markuspetrux Exp $
 
 /**
  * @file
@@ -14,7 +14,16 @@
  * Note this process may eat a lot of resources, and it will be executed by
  * anonymous user, so access control is based on IP.
  */
-function sphinxsearch_xmlpipe() {
+function sphinxsearch_xmlpipe($caller_version = 0) {
+  // Check caller version.
+  $sphinxsearch_xmlpipe_generator_version = 2;
+  if ((int)$caller_version != $sphinxsearch_xmlpipe_generator_version) {
+    $message = t('Oops! It looks like version of your sphinxsearch_xmlpipe.php script does not match the version expected by the sphinxsearch module. Maybe someone forgot to upgrade the contents of the sphinxsearch_scripts subdirectory when updating the module.');
+    watchdog('sphinxsearch', $message, WATCHDOG_ERROR);
+    print $message ."\n";
+    exit;
+  }
+
   // Check access to XMLPipe process by IP.
   $access_xmlpipe = FALSE;
   $sphinxsearch_indexer_ips = array_map('trim', explode(',', variable_get('sphinxsearch_indexer_ips', '')));
@@ -36,20 +45,27 @@ function sphinxsearch_xmlpipe() {
   // Obtain current mode of operation.
   $mode = (isset($_GET['mode']) ? trim($_GET['mode']) : '');
 
+  // Prepare global data for XMLPipe generation.
+  $GLOBALS['sphinxsearch_start_execution_time'] = time();
+  $GLOBALS['sphinxsearch_max_execution_time'] = (int)ini_get('max_execution_time');
+  $GLOBALS['sphinxsearch_memory_limit'] = sphinxsearch_get_memory_limit();
+  $GLOBALS['sphinxsearch_initial_memory_usage'] = memory_get_usage();
+  $GLOBALS['sphinxsearch_taxonomy_module_exists'] = module_exists('taxonomy');
+
+  if ($GLOBALS['sphinxsearch_taxonomy_module_exists']) {
+    require_once(drupal_get_path('module', 'sphinxsearch') .'/sphinxsearch.taxonomy.inc');
+  }
+
   // Check PHP settings for resource consumption control.
-  $GLOBALS['sphinx_start_execution_time'] = time();
-  $GLOBALS['sphinx_max_execution_time'] = (int)ini_get('max_execution_time');
-  $GLOBALS['sphinx_memory_limit'] = sphinxsearch_get_memory_limit();
-  $GLOBALS['sphinx_initial_memory_usage'] = memory_get_usage();
-  if ($GLOBALS['sphinx_memory_limit'] < 0) {
+  if ($GLOBALS['sphinxsearch_memory_limit'] < 0) {
     $message = t('Unable to obtain PHP memory limit. Please, make sure your PHP installation is compiled with --enable-memory-limit option.');
     watchdog('sphinxsearch', $message, WATCHDOG_ERROR);
     print $message ."\n";
     exit;
   }
-  if ($GLOBALS['sphinx_max_execution_time'] < 30) {
+  if ($GLOBALS['sphinxsearch_max_execution_time'] < 30) {
     $message = t('Maximum PHP execution time is set to @max_execution_time seconds, but this window is too short for this process.', array(
-      '@max_execution_time' => $GLOBALS['sphinx_max_execution_time']
+      '@max_execution_time' => $GLOBALS['sphinxsearch_max_execution_time']
     ));
     watchdog('sphinxsearch', $message, WATCHDOG_ERROR);
     print $message ."\n";
@@ -67,7 +83,7 @@ function sphinxsearch_xmlpipe() {
     // Obtain range of nodes to be included in this main index.
     $first_nid = (isset($_GET['first_nid']) ? max(0, (int)$_GET['first_nid']) : 0);
     $last_nid = (isset($_GET['last_nid']) ? max(0, (int)$_GET['last_nid']) : -1);
-    if ( $last_nid < 0 ) {
+    if ($last_nid < 0) {
       $sql_node_types_condition = sphinxsearch_get_enabled_node_types_condition();
       if (!empty($sql_node_types_condition)) {
         $sql_node_types_condition = ' AND '. $sql_node_types_condition;
@@ -129,11 +145,11 @@ function sphinxsearch_generate_xmlpipe_main($main_index_id, $first_nid, $last_ni
     '@main_index_id' => $main_index_id,
     '@first_nid' => $first_nid,
     '@last_nid' => $last_nid,
-    '@max_execution_time' => $GLOBALS['sphinx_max_execution_time'],
-    '@memory_limit_bytes' => $GLOBALS['sphinx_memory_limit'],
-    '@memory_limit_kb' => round($GLOBALS['sphinx_memory_limit'] / 1024, 2),
-    '@initial_memory_bytes' => $GLOBALS['sphinx_initial_memory_usage'],
-    '@initial_memory_kb' => round($GLOBALS['sphinx_initial_memory_usage'] / 1024, 2),
+    '@max_execution_time' => $GLOBALS['sphinxsearch_max_execution_time'],
+    '@memory_limit_bytes' => $GLOBALS['sphinxsearch_memory_limit'],
+    '@memory_limit_kb' => round($GLOBALS['sphinxsearch_memory_limit'] / 1024, 2),
+    '@initial_memory_bytes' => $GLOBALS['sphinxsearch_initial_memory_usage'],
+    '@initial_memory_kb' => round($GLOBALS['sphinxsearch_initial_memory_usage'] / 1024, 2),
   )), WATCHDOG_NOTICE);
 
   // Generate XMLPipe header.
@@ -151,16 +167,16 @@ function sphinxsearch_generate_xmlpipe_main($main_index_id, $first_nid, $last_ni
   {
     // Abort processing if current memory usage is more than 90%.
     $current_memory_bytes = memory_get_usage();
-    if (intval($current_memory_bytes * 100 / $GLOBALS['sphinx_memory_limit']) > 90) {
+    if (intval($current_memory_bytes * 100 / $GLOBALS['sphinxsearch_memory_limit']) > 90) {
       $message = t('Short on resources. Current memory usage is higher than 90% of PHP memory_limit.<ul>
           <li>PHP memory_limit: @memory_limit_bytes bytes (@memory_limit_kb KB).</li>
           <li>Initial memory usage: @initial_memory_bytes bytes (@initial_memory_kb KB).</li>
           <li>Current memory usage: @current_memory_bytes bytes (@current_memory_kb KB).</li>
         </ul>', array(
-        '@memory_limit_bytes' => $GLOBALS['sphinx_memory_limit'],
-        '@memory_limit_kb' => round($GLOBALS['sphinx_memory_limit'] / 1024, 2),
-        '@initial_memory_bytes' => $GLOBALS['sphinx_initial_memory_usage'],
-        '@initial_memory_kb' => round($GLOBALS['sphinx_initial_memory_usage'] / 1024, 2),
+        '@memory_limit_bytes' => $GLOBALS['sphinxsearch_memory_limit'],
+        '@memory_limit_kb' => round($GLOBALS['sphinxsearch_memory_limit'] / 1024, 2),
+        '@initial_memory_bytes' => $GLOBALS['sphinxsearch_initial_memory_usage'],
+        '@initial_memory_kb' => round($GLOBALS['sphinxsearch_initial_memory_usage'] / 1024, 2),
         '@current_memory_bytes' => $current_memory_bytes,
         '@current_memory_kb' => round($current_memory_bytes / 1024, 2),
       ));
@@ -168,15 +184,15 @@ function sphinxsearch_generate_xmlpipe_main($main_index_id, $first_nid, $last_ni
       print strip_tags($message) ."\n";
       exit;
     }
-    // Let's supose we need less than 30 seconds to process one single node.
+    // Let's supose we need less than 30 seconds to process one single chunk of nodes.
     // Abort processing if current execution time is about to be higher than max.
-    $current_execution_time = time() - $GLOBALS['sphinx_start_execution_time'];
-    if (($GLOBALS['sphinx_max_execution_time'] - $current_execution_time) < 30) {
+    $current_execution_time = time() - $GLOBALS['sphinxsearch_start_execution_time'];
+    if (($GLOBALS['sphinxsearch_max_execution_time'] - $current_execution_time) < 30) {
       $message = t('Short on resources. Current execution time is about to exceed PHP max_execution_time.<ul>
           <li>PHP max_execution_time: @max_execution_time seconds.</li>
           <li>Currrent execution time: @current_execution_time seconds.</li>
         </ul>', array(
-        '@max_execution_time' => $GLOBALS['sphinx_max_execution_time'],
+        '@max_execution_time' => $GLOBALS['sphinxsearch_max_execution_time'],
         '@current_execution_time' => $current_execution_time,
       ));
       sphinxsearch_watchdog('sphinxsearch', $message, WATCHDOG_ERROR);
@@ -219,15 +235,15 @@ function sphinxsearch_generate_xmlpipe_main($main_index_id, $first_nid, $last_ni
       if ($chunks_counter >= $chunks_before_restart) {
         sphinxsearch_db_reconnect();
         $current_memory_bytes = memory_get_usage();
-        $current_execution_time = time() - $GLOBALS['sphinx_start_execution_time'];
+        $current_execution_time = time() - $GLOBALS['sphinxsearch_start_execution_time'];
         sphinxsearch_watchdog('sphinxsearch', t('Database server connection has been restarted.<ul>
             <li>Initial memory usage: @initial_memory_bytes bytes (@initial_memory_kb KB).</li>
             <li>Current memory usage: @current_memory_bytes bytes (@current_memory_kb KB).</li>
             <li>Current execution time: @current_execution_time seconds.</li>
             <li>Nodes processed: @nodes_counter (@nodes_per_second nodes/sec).</li>
           </ul>', array(
-          '@initial_memory_bytes' => $GLOBALS['sphinx_initial_memory_usage'],
-          '@initial_memory_kb' => round($GLOBALS['sphinx_initial_memory_usage'] / 1024, 2),
+          '@initial_memory_bytes' => $GLOBALS['sphinxsearch_initial_memory_usage'],
+          '@initial_memory_kb' => round($GLOBALS['sphinxsearch_initial_memory_usage'] / 1024, 2),
           '@current_memory_bytes' => $current_memory_bytes,
           '@current_memory_kb' => round($current_memory_bytes / 1024, 2),
           '@current_execution_time' => $current_execution_time,
@@ -244,7 +260,7 @@ function sphinxsearch_generate_xmlpipe_main($main_index_id, $first_nid, $last_ni
 
   // Store process statistics to watchdog.
   $current_memory_bytes = memory_get_usage();
-  $total_execution_time = time() - $GLOBALS['sphinx_start_execution_time'];
+  $total_execution_time = time() - $GLOBALS['sphinxsearch_start_execution_time'];
   sphinxsearch_watchdog('sphinxsearch', t('XMLPipe processing for main index @main_index_id has finished successfully.<ul>
       <li>Initial memory usage: @initial_memory_bytes bytes (@initial_memory_kb KB).</li>
       <li>Current memory usage: @current_memory_bytes bytes (@current_memory_kb KB).</li>
@@ -252,8 +268,8 @@ function sphinxsearch_generate_xmlpipe_main($main_index_id, $first_nid, $last_ni
       <li>Nodes processed: @nodes_counter (@nodes_per_second nodes/sec).</li>
     </ul>', array(
     '@main_index_id' => $main_index_id,
-    '@initial_memory_bytes' => $GLOBALS['sphinx_initial_memory_usage'],
-    '@initial_memory_kb' => round($GLOBALS['sphinx_initial_memory_usage'] / 1024, 2),
+    '@initial_memory_bytes' => $GLOBALS['sphinxsearch_initial_memory_usage'],
+    '@initial_memory_kb' => round($GLOBALS['sphinxsearch_initial_memory_usage'] / 1024, 2),
     '@current_memory_bytes' => $current_memory_bytes,
     '@current_memory_kb' => round($current_memory_bytes / 1024, 2),
     '@total_execution_time' => $total_execution_time,
@@ -294,15 +310,14 @@ function sphinxsearch_generate_xmlpipe_delta() {
   $nodes_counter = 0;
 
   // Setup Sphinx search client.
-  $sphinxsearch = sphinxsearch_get_client();
+  $sphinxsearch = &sphinxsearch_get_client();
   $sphinxsearch->SetArrayResult(TRUE);
-  $delta_index_id = -1;
 
   // Obtain list of main index identifiers.
   // Note that index identifier used for documents stored on
   // delta index is ignored here.
   $sphinxsearch->SetLimits(0, 100);
-  $sphinxsearch->SetFilter('main_index_id', array($delta_index_id), TRUE);
+  $sphinxsearch->SetFilter('main_index_id', array(SPHINXSEARCH_DELTA_INDEX_ID), TRUE);
   $sphinxsearch->SetGroupBy('main_index_id', SPH_GROUPBY_ATTR, 'main_index_id ASC');
   $query_result = $sphinxsearch->Query('', $sphinxsearch_query_index);
   $main_indexes_info = array();
@@ -324,7 +339,11 @@ function sphinxsearch_generate_xmlpipe_delta() {
   }
 
   // Obtain index boundaries currently stored on each main index.
-  $query_keys = array('last_updated', 'first_nid', 'last_nid');
+  $query_keys = array(
+    'last_updated' => 'last_updated',
+    'first_nid' => 'nid',
+    'last_nid' => 'nid',
+  );
   foreach ($main_indexes_info as $main_index_id => $main_index_info) {
     // Reset query internals for current main index.
     $query_ids = array();
@@ -360,7 +379,7 @@ function sphinxsearch_generate_xmlpipe_delta() {
         }
       }
     }
-    foreach ($query_keys as $query_key) {
+    foreach ($query_keys as $query_key => $field_key) {
       if (!is_array($main_indexes_info[$main_index_id][$query_key])) {
         $message = t('XMLPipe for delta index failed: Could not obtain @query_key data for main index @main_index_id.', array(
           '@query_key' => $query_key,
@@ -370,7 +389,6 @@ function sphinxsearch_generate_xmlpipe_delta() {
         print $message ."\n";
         exit;
       }
-      $field_key = ($query_key == 'last_updated' ? 'last_updated' : 'nid');
       $main_indexes_info[$main_index_id][$query_key] = $main_indexes_info[$main_index_id][$query_key][$field_key];
     }
   }
@@ -412,7 +430,7 @@ function sphinxsearch_generate_xmlpipe_delta() {
 
     // Process nodes for current main index.
     foreach ($nids as $nid) {
-      $xmlpipe_document = sphinxsearch_xmlpipe_document($delta_index_id, $nid);
+      $xmlpipe_document = sphinxsearch_xmlpipe_document(SPHINXSEARCH_DELTA_INDEX_ID, $nid);
       if ($xmlpipe_document) {
         print $xmlpipe_document;
       }
@@ -439,15 +457,15 @@ function sphinxsearch_generate_xmlpipe_delta() {
 
   // Store process statistics to watchdog.
   $current_memory_bytes = memory_get_usage();
-  $total_execution_time = time() - $GLOBALS['sphinx_start_execution_time'];
+  $total_execution_time = time() - $GLOBALS['sphinxsearch_start_execution_time'];
   $watchdog_report = t('XMLPipe processing for delta index has finished successfully.<ul>
       <li>Initial memory usage: @initial_memory_bytes bytes (@initial_memory_kb KB).</li>
       <li>Current memory usage: @current_memory_bytes bytes (@current_memory_kb KB).</li>
       <li>Total execution time: @total_execution_time seconds.</li>
       <li>Nodes processed: @nodes_counter (@nodes_per_second nodes/sec).</li>
     </ul>', array(
-    '@initial_memory_bytes' => $GLOBALS['sphinx_initial_memory_usage'],
-    '@initial_memory_kb' => round($GLOBALS['sphinx_initial_memory_usage'] / 1024, 2),
+    '@initial_memory_bytes' => $GLOBALS['sphinxsearch_initial_memory_usage'],
+    '@initial_memory_kb' => round($GLOBALS['sphinxsearch_initial_memory_usage'] / 1024, 2),
     '@current_memory_bytes' => $current_memory_bytes,
     '@current_memory_kb' => round($current_memory_bytes / 1024, 2),
     '@total_execution_time' => $total_execution_time,
@@ -469,17 +487,29 @@ function sphinxsearch_xmlpipe_header() {
 
   // Build document schema.
   $output .= '<sphinx:schema>' ."\n";
+
+  // Text fields.
   $output .= '<sphinx:field name="subject"/>' ."\n";
   $output .= '<sphinx:field name="content"/>' ."\n";
-  $output .= '<sphinx:attr name="subject" type="str2ordinal"/>' ."\n";
-  $output .= '<sphinx:attr name="main_index_id" type="int" bits="32" default="0"/>' ."\n";
+
+  // Node related attributes.
   $output .= '<sphinx:attr name="nid" type="int" bits="32" default="0"/>' ."\n";
   $output .= '<sphinx:attr name="uid" type="int" bits="32" default="0"/>' ."\n";
   $output .= '<sphinx:attr name="nodetype" type="int" bits="32" default="0"/>' ."\n";
-  $output .= '<sphinx:attr name="changed" type="timestamp"/>' ."\n";
+  $output .= '<sphinx:attr name="created" type="timestamp"/>' ."\n";
   $output .= '<sphinx:attr name="last_updated" type="timestamp"/>' ."\n";
+
+  // Taxonomy related attributes.
+  if ($GLOBALS['sphinxsearch_taxonomy_module_exists']) {
+    foreach (sphinxsearch_get_enabled_vocabularies() as $vid => $void) {
+      $output .= '<sphinx:attr name="terms'. $vid .'" type="multi"/>' ."\n";
+    }
+    $output .= '<sphinx:attr name="vid" type="multi"/>' ."\n";
+  }
+
+  // Internal attributes.
   $output .= '<sphinx:attr name="is_deleted" type="bool" default="0"/>' ."\n";
-  $output .= '<sphinx:attr name="tid" type="multi"/>' ."\n";
+  $output .= '<sphinx:attr name="main_index_id" type="int" bits="32" default="0"/>' ."\n";
   $output .= '</sphinx:schema>' ."\n";
   return $output;
 }
@@ -496,9 +526,9 @@ function sphinxsearch_xmlpipe_footer() {
  * Generate a single XMLPipe document.
  */
 function sphinxsearch_xmlpipe_document($main_index_id, $nid) {
-  static $sphinxsearch_docid_offset;
-  if (!isset($sphinxsearch_docid_offset)) {
-    $sphinxsearch_docid_offset = (int)variable_get('sphinxsearch_docid_offset', 0);
+  static $vocabularies;
+  if (!isset($vocabularies)) {
+    $vocabularies = sphinxsearch_get_enabled_vocabularies();
   }
 
   $node = node_load($nid, NULL, TRUE);
@@ -511,23 +541,46 @@ function sphinxsearch_xmlpipe_document($main_index_id, $nid) {
   $text = sphinxsearch_get_node_text($node);
 
   // Generate the XML for this document.
-  $output .= '<sphinx:document id="'. ($nid + $sphinxsearch_docid_offset) .'">' ."\n";
+  $output .= '<sphinx:document id="'. $nid .'">' ."\n";
+
+  // Text fields.
+  $output .= '<subject><![CDATA[['. check_plain($node->title) .']]></subject>' ."\n";
+  $output .= '<content><![CDATA[['. check_plain($text) .']]></content>' ."\n";
+
+  // Node related attributes.
   $output .= '<nid>'. $nid .'</nid>' ."\n";
   $output .= '<uid>'. $node->uid .'</uid>' ."\n";
-  $output .= '<changed>'. $node->changed .'</changed>' ."\n";
+  $output .= '<nodetype>'. sphinxsearch_xmlpipe_nodetype('id', $node->type) .'</nodetype>' ."\n";
+  $output .= '<created>'. $node->created .'</created>' ."\n";
+
+  // Taxonomy related attributes.
+  if ($GLOBALS['sphinxsearch_taxonomy_module_exists']) {
+    $vids = array();
+    foreach ($node->taxonomy as $tid => $term) {
+      if (empty($vocabularies) || isset($vocabularies[$term->vid])) {
+        if (!isset($vids[$term->vid])) {
+          $vids[$term->vid] = array();
+        }
+        $vids[$term->vid][] = $tid;
+      }
+    }
+    if (!empty($vids)) {
+      foreach ($vids as $vid => $tids) {
+        $output .= '<terms'. $vid .'>'. implode(' ', $tids) .'</terms'. $vid .'>' ."\n";
+      }
+      $output .= '<vid>'. implode(' ', array_keys($vids)) .'</vid>' ."\n";
+    }
+  }
+
+  // Internal attributes.
   if (!empty($node->last_comment_timestamp) && $node->last_comment_timestamp > $node->changed) {
     $output .= '<last_updated>'. $node->last_comment_timestamp .'</last_updated>' ."\n";
   }
   else {
     $output .= '<last_updated>'. $node->changed .'</last_updated>' ."\n";
   }
-  $output .= '<nodetype>'. sphinxsearch_get_node_type_id($node->type) .'</nodetype>' ."\n";
-  if (!empty($node->taxonomy) && is_array($node->taxonomy)) {
-    $output .= '<tid>'. implode(' ', array_keys($node->taxonomy)) .'</tid>' ."\n";
-  }
   $output .= '<main_index_id>'. $main_index_id .'</main_index_id>' ."\n";
-  $output .= '<subject><![CDATA[['. check_plain($node->title) .']]></subject>' ."\n";
-  $output .= '<content><![CDATA[['. check_plain($text) .']]></content>' ."\n";
+
   $output .= '</sphinx:document>' ."\n";
   return $output;
 }

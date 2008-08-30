@@ -1,9 +1,9 @@
 <?php
-// $Id: sphinxsearch_xmlpipe.php,v 1.1 2008/08/18 13:52:24 markuspetrux Exp $
+// $Id: sphinxsearch_xmlpipe.php,v 1.2 2008/08/30 06:53:32 markuspetrux Exp $
 
 /**
  * @file
- * Handles incoming requests Sphinx indexer to generate XMLPipe stream.
+ * Handles incoming requests from Sphinx indexer to generate XMLPipe stream.
  * Access control to this script is based on IP Addresses specified
  * in module settings panel.
  */
@@ -24,7 +24,19 @@ require_once('./includes/bootstrap.inc');
 drupal_bootstrap(DRUPAL_BOOTSTRAP_FULL);
 
 // Load XMLPipe generator code.
-require_once(drupal_get_path('module', 'sphinxsearch') .'/sphinxsearch.xmlpipe.inc');
+$module_path = drupal_get_path('module', 'sphinxsearch');
+require_once($module_path .'/sphinxsearch.common.inc');
+require_once($module_path .'/sphinxsearch.xmlpipe.inc');
+
+// Since this script is located on a subdirectory that should be copied to
+// Drupal root directory, we use version numbers as a method to handshake with
+// currently installed module, so we can prevent possible problems if someone
+// updated the module but forgot to update this script.
+// Anyway, this version number needs to be altered only if/when this script
+// is changed in a way that may generate incompatibility issues. Otherwise,
+// it doesn't matter much if it is not updated. It is just safety measure in
+// case we need to check for incompatibility issues in the future.
+$sphinxsearch_xmlpipe_generator_version = 2;
 
 // Launch XMLPipe generator.
-sphinxsearch_xmlpipe();
+sphinxsearch_xmlpipe($sphinxsearch_xmlpipe_generator_version);

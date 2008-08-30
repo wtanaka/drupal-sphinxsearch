@@ -1,5 +1,5 @@
 <?php
-// $Id: sphinxsearch.pages.inc,v 1.2 2008/08/19 01:37:49 markuspetrux Exp $
+// $Id: sphinxsearch.pages.inc,v 1.3 2008/08/30 06:53:31 markuspetrux Exp $
 
 /**
  * @file
@@ -8,72 +8,105 @@
 
 /**
  * Menu callback; presents the search form and/or search results.
+ *
+ * Search form submits with POST but redirects to GET. This way we can keep
+ * the search query URL clean as a whistle:
+ * http://www.example.com/search-path?keys=... (including keys and options)
+ * @see sphinxsearch_get_search_path()
+ * @see sphinxsearch_get_query_string()
  */
 function sphinxsearch_search_page() {
-  // Search form submits with POST but redirects to GET. This way we can keep
-  // the search query URL clean as a whistle:
-  // SPHINXSEARCH_PATH_PREFIX/keyword+keyword
-  if (!isset($_POST['form_id'])) {
-    $keys = trim(arg(1));
-    $search_options = sphinxsearch_parse_search_options();
-
-    // Construct the search form.
-    $output = drupal_get_form('sphinxsearch_search_form', $keys, $search_options);
-
-    // Only perform search if there is non-whitespace search term:
-    if (!empty($keys)) {
-      // Collect the search results.
-      $results = sphinxsearch_search_data($keys, $search_options);
-
-      if ($results) {
-        $output .= theme('box', t('Search results'), $results);
-
-        // Log the search keys.
-        watchdog('search', t('%keys', array('%keys' => $keys)), WATCHDOG_NOTICE, l(t('results'), SPHINXSEARCH_PATH_PREFIX .'/'. $keys));
-      }
-      else {
-        $output .= theme('box', t('Your search yielded no results'), sphinxsearch_help('search#noresults'));
-      }
-    }
-    return $output;
+  if (isset($_POST['form_id'])) {
+    // Let POST method redirect to GET.
+    return drupal_get_form('sphinxsearch_search_form');
   }
-  return drupal_get_form('sphinxsearch_search_form');
+
+  // Parse request and build search options structure.
+  $search_options = sphinxsearch_parse_request($_GET);
+
+  // If any error was found in request, display them and render expanded search form.
+  if (!empty($search_options['errors'])) {
+    foreach ($search_options['errors'] as $field_name => $message) {
+      form_set_error($field_name, $message);
+    }
+    return drupal_get_form('sphinxsearch_search_form', $search_options, FALSE);
+  }
+
+  // If no filters have specified, just render a clean collapsed search form.
+  // If form was submitted, user has already been warned from submit handler.
+  if (empty($search_options['filters'])) {
+    return drupal_get_form('sphinxsearch_search_form', $search_options);
+  }
+
+  // Execute search query and collect the results.
+  $search_results = sphinxsearch_execute_query($search_options);
+
+  // If any, display warnings if user is administrator,
+  // or store them to watchdog for later review.
+  if (!empty($search_results['warnings'])) {
+    sphinxsearch_watchdog_warning(implode('<br />', $search_results['warnings']));
+  }
+
+  // Deal with search results.
+  if ($search_results['total_available'] <= 0) {
+    if (!empty($search_results['error_message'])) {
+      drupal_set_message($search_results['error_message'], 'error');
+    }
+    // Display no results warning and render expanded search form.
+    $output = theme('box', t('Your search yielded no results'), sphinxsearch_help('sphinxsearch#noresults'));
+    $output .= drupal_get_form('sphinxsearch_search_form', $search_options, FALSE);
+  }
+  else {
+    // Render collapsed search form and search results.
+    $output = drupal_get_form('sphinxsearch_search_form', $search_options);
+    $output .= theme('box', t('Search results'), theme('sphinxsearch_search_results', $search_options, $search_results));
+
+    // Log the search keys.
+    $query_string = sphinxsearch_get_query_string($search_options);
+    watchdog(
+      'search',
+      t('%keys %query', array(
+        '%keys' => (!empty($search_options['filters']['keys']) ? $search_options['filters']['keys'] : t('(no keywords)')),
+        '%query' => (!empty($query_string) ? '?'. urldecode($query_string) : ''),
+      )),
+      WATCHDOG_NOTICE,
+      l(t('results'), sphinxsearch_get_search_path(), array(), $query_string)
+    );
+  }
+
+  return $output;
 }
 
 /**
- * Parse search options.
+ * Record a warning to watchdog.
+ *
+ * If current user has 'administer sphinxsearch' privilege,
+ * then the warning is just sent to the user interface.
+ *
+ * @param string $message
  */
-function sphinxsearch_parse_search_options() {
-  $search_options = array();
-  $types = (isset($_GET['types']) ? array_filter(array_map('trim', explode(',', $_GET['types']))) : array());
-  $sphinxsearch_enabled_node_types = sphinxsearch_get_enabled_node_types();
-  foreach ($types as $type) {
-    if (in_array($type, $sphinxsearch_enabled_node_types)) {
-      if (!isset($search_options['types'])) {
-        $search_options['types'] = array();
-      }
-      $search_options['types'][] = $type;
-    }
+function sphinxsearch_watchdog_warning($message) {
+  if (user_access('administer sphinxsearch')) {
+    drupal_set_message($message, 'error');
   }
-  if (isset($_GET['author'])) {
-    $search_options['author'] = $_GET['author'];
+  else {
+    watchdog('sphinxsearch', $message, WATCHDOG_WARNING);
   }
-  return $search_options;
 }
 
 /**
  * Render a search form.
  *
- * @param $keys
- *   The search string entered by the user, containing keywords for the search.
- * @return
- *   An HTML string containing the search form.
+ * @param array $search_options
+ *   The search string and options entered by the user.
+ * @param boolean $advanced_options_collapsed
+ *   TRUE to collapse Advanced search options fieldset.
+ * @return array
+ *   The search form.
  */
-function sphinxsearch_search_form($keys = '', $search_options = array()) {
-  drupal_add_css(drupal_get_path('module', 'sphinxsearch') .'/sphinxsearch.css', 'module', 'all', FALSE);
-
+function sphinxsearch_search_form($search_options = array(), $advanced_options_collapsed = TRUE) {
   $form = array(
-    '#action' => url(SPHINXSEARCH_PATH_PREFIX),
+    '#action' => url(sphinxsearch_get_search_path()),
     '#attributes' => array('class' => 'search-form'),
   );
   $form['basic'] = array('#type' => 'item', '#title' => t('Enter your keywords'));
@@ -81,7 +114,7 @@ function sphinxsearch_search_form($keys = '', $search_options = array()) {
   $form['basic']['inline']['keys'] = array(
     '#type' => 'textfield',
     '#title' => '',
-    '#default_value' => $keys,
+    '#default_value' => $search_options['filters']['keys'],
     '#size' => 50,
     '#maxlength' => 255,
   );
@@ -90,10 +123,21 @@ function sphinxsearch_search_form($keys = '', $search_options = array()) {
   $form['advanced'] = array(
     '#type' => 'fieldset',
     '#title' => t('Advanced search'),
-    '#collapsible' => TRUE,
-    '#collapsed' => empty($search_options),
+    '#collapsible' => TRUE, '#collapsed' => $advanced_options_collapsed,
     '#attributes' => array('class' => 'search-advanced'),
   );
+
+  // Matching modes.
+  $form['advanced']['matchmode'] = array(
+    '#type' => 'radios',
+    '#title' => t('Matching mode'),
+    '#prefix' => '<div class="criterion">',
+    '#suffix' => '</div>',
+    '#options' => sphinxsearch_get_matching_modes(),
+    '#default_value' => (isset($search_options['matchmode']) ? $search_options['matchmode'] : SPHINXSEARCH_MATCH_ALL),
+  );
+
+  // Filter by content author.
   $form['advanced']['author'] = array(
     '#type' => 'textfield',
     '#title' => t('Author'),
@@ -101,21 +145,102 @@ function sphinxsearch_search_form($keys = '', $search_options = array()) {
     '#suffix' => '</div>',
     '#maxlength' => 60,
     '#autocomplete_path' => 'user/autocomplete',
-    '#default_value' => (isset($search_options['author']) ? $search_options['author'] : ''),
+    '#default_value' => (isset($search_options['filters']['author']['name']) ? $search_options['filters']['author']['name'] : ''),
+    '#description' => t('Use this option to filter search results by content author.'),
   );
+
+  // Filter by content type (only if more than one content type exists).
   $system_node_types = array_map('check_plain', node_get_types('names'));
   $search_node_types = array();
   foreach (sphinxsearch_get_enabled_node_types() as $type) {
     $search_node_types[$type] = $system_node_types[$type];
   }
-  $form['advanced']['types'] = array(
-    '#type' => 'checkboxes',
-    '#title' => t('Only of the type(s)'),
+  if (count($search_node_types) > 1) {
+    $form['advanced']['types'] = array(
+      '#type' => 'checkboxes',
+      '#title' => t('Only of the type(s)'),
+      '#prefix' => '<div class="criterion">',
+      '#suffix' => '</div>',
+      '#options' => $search_node_types,
+      '#default_value' => (isset($search_options['filters']['types']) ? $search_options['filters']['types'] : array()),
+    );
+  }
+
+  // Filter by taxonomy (only if taxonomy module is enabled).
+  if (module_exists('taxonomy')) {
+    $vocabularies = sphinxsearch_get_enabled_vocabularies();
+    // Build filtering options for enabled vocabularies.
+    if (!empty($vocabularies)) {
+      $form['advanced']['taxonomy'] = array();
+      foreach ($vocabularies as $vid => $vocabulary) {
+        $terms_key = 'terms'. $vid;
+        $search_terms = (!empty($search_options['filters']['taxonomy'][$vid]) ? $search_options['filters']['taxonomy'][$vid] : array());
+        if ($vocabulary->tags) {
+          // Note: for some reason, titles for freetagging vocabularies are not
+          // check_plain'd in taxonomy module. Let's be consistent with core.
+          $form['advanced']['taxonomy']['tags'][$terms_key] = array(
+            '#type' => 'textfield',
+            '#title' => $vocabulary->name,
+            '#description' => t('If you wish to filter by more than one term, you can separate them with commas. Example: funny, bungee jumping, "Company, Inc.".'),
+            '#default_value' => sphinxsearch_taxonomy_encode_typed_terms($search_terms),
+            '#autocomplete_path' => 'taxonomy/autocomplete/'. $vid,
+            '#weight' => $vocabulary->weight,
+            '#maxlength' => 255,
+          );
+        }
+        else {
+          $tree = taxonomy_get_tree($vid);
+          if ($tree) {
+            $options = array();
+            foreach ($tree as $term) {
+              $choice = new stdClass();
+              $choice->option = array($term->tid => str_repeat('-', $term->depth) . $term->name);
+              $options[] = $choice;
+            }
+            if (!empty($options)) {
+              $form['advanced']['taxonomy'][$terms_key] = array(
+                '#type' => 'select',
+                '#title' => check_plain($vocabulary->name),
+                '#description' => t('Select one or more items to filter search results by terms of this category.'),
+                '#default_value' => array_keys($search_terms),
+                '#options' => $options,
+                '#multiple' => TRUE,
+                '#size' => min(10, count($options)),
+                '#weight' => $vocabulary->weight,
+              );
+            }
+          }
+        }
+      }
+      // Add fieldset only if form has more than 1 vocabulary element.
+      if (count($form['advanced']['taxonomy']) > 1) {
+        $form['advanced']['taxonomy'] += array(
+          '#type' => 'fieldset',
+          '#title' => t('Categories'),
+          '#collapsible' => TRUE, '#collapsed' => empty($search_options['filters']['taxonomy']),
+        );
+      }
+    }
+  }
+
+  // Sort options.
+  $form['advanced']['sortfield'] = array(
+    '#type' => 'radios',
+    '#title' => t('Order by'),
     '#prefix' => '<div class="criterion">',
     '#suffix' => '</div>',
-    '#options' => $search_node_types,
-    '#default_value' => (isset($search_options['types']) ? $search_options['types'] : array()),
+    '#options' => sphinxsearch_get_sortable_fields(),
+    '#default_value' => (isset($search_options['sortfield']) ? $search_options['sortfield'] : '@weight'),
   );
+  $form['advanced']['sortdir'] = array(
+    '#type' => 'radios',
+    '#title' => t('Sort direction'),
+    '#prefix' => '<div class="criterion">',
+    '#suffix' => '</div>',
+    '#options' => array('ASC' => t('Ascending'), 'DESC' => t('Descending')),
+    '#default_value' => (isset($search_options['sortdir']) ? $search_options['sortdir'] : 'DESC'),
+  );
+
   $form['advanced']['submit'] = array(
     '#type' => 'submit',
     '#value' => t('Advanced search'),
@@ -127,201 +252,61 @@ function sphinxsearch_search_form($keys = '', $search_options = array()) {
 }
 
 /**
+ * Validate a search form submission.
+ */
+function sphinxsearch_search_form_validate($form_id, $form_values) {
+  $search_options = sphinxsearch_parse_request($form_values);
+  if (!empty($search_options['errors'])) {
+    foreach ($search_options['errors'] as $field_name => $message) {
+      form_set_error($field_name, $message);
+    }
+  }
+}
+
+/**
  * Process a search form submission.
  */
 function sphinxsearch_search_form_submit($form_id, $form_values) {
-  // Remove redundant whitespaces.
-  $keys = preg_replace('#\s+#', ' ', trim($form_values['keys']));
-  if (empty($keys)) {
-    form_set_error('keys', t('Please enter some keywords.'));
-    // Fall through to the drupal_goto() call.
+  $search_options = sphinxsearch_parse_request($form_values);
+  $query_string = sphinxsearch_get_query_string($search_options);
+  if (empty($query_string)) {
+    form_set_error('keys', t('Please enter some keywords and/or other search options.'));
   }
-  $query = array();
-  if (!empty($form_values['types'])) {
-    $types = array();
-    foreach ($form_values['types'] as $type => $value) {
-      if (!empty($value)) {
-        $types[] = $type;
-      }
-    }
-    if (!empty($types)) {
-      $query[] = 'types='. implode(',', $types);
-    }
-  }
-  if (!empty($form_values['author'])) {
-    $query[] = 'author='. $form_values['author'];
-  }
-  if (!empty($query)) {
-    drupal_goto(SPHINXSEARCH_PATH_PREFIX .'/'. $keys, implode('&', $query));
-  }
-  drupal_goto(SPHINXSEARCH_PATH_PREFIX .'/'. $keys);
-}
-
-/**
- * Perform a standard search on the given keys, and return the formatted results.
- */
-function sphinxsearch_search_data($keys = NULL, $search_options = array()) {
-  $sphinxsearch_query_index = variable_get('sphinxsearch_query_index', '');
-  if (empty($sphinxsearch_query_index)) {
-    drupal_set_message(t('Sphinx query index not specified.'), 'error');
-    return '';
-  }
-  $results_per_page = (int)variable_get('sphinxsearch_results_per_page', 10);
-  $output = '';
-  if (!empty($keys)) {
-    $current_page = sphinxsearch_search_get_current_page();
-    $sphinxsearch = sphinxsearch_get_client();
-    $sphinxsearch->SetLimits($current_page * $results_per_page, $results_per_page);
-    $sphinxsearch->SetFieldWeights(array('subject' => 2, 'content' => 1));
-    $sphinxsearch->SetMatchMode(SPH_MATCH_EXTENDED);
-    $sphinxsearch->SetSortMode(SPH_SORT_EXTENDED, '@weight DESC, changed DESC');
-    if (isset($search_options['types'])) {
-      $filter_values = array();
-      foreach ($search_options['types'] as $type) {
-        $filter_values[] = sphinxsearch_get_node_type_id($type);
-      }
-      $sphinxsearch->SetFilter('nodetype', $filter_values);
-    }
-    if (!empty($search_options['author'])) {
-      $uid = (int)db_result(db_query('SELECT uid FROM {users} WHERE name = \'%s\'', $search_options['author']));
-      if ($uid > 0) {
-        $sphinxsearch->SetFilter('uid', array($uid));
-      }
-    }
-    $sphinxsearch->SetFilter('is_deleted', array(0));
-    $results = $sphinxsearch->Query($keys, $sphinxsearch_query_index);
-    if (!$results) {
-      sphinxsearch_ui_warning(t('Search failed: !message', array('!message' => $sphinxsearch->GetLastError())));
-      if (!sphinxsearch_check_connection()) {
-        drupal_set_message(t('Search service is disabled temporarily. Please, try again later.'), 'error');
-      }
-    }
-    else {
-      $results['query'] = $keys;
-      $message = $sphinxsearch->GetLastWarning();
-      if (!empty($message)) {
-        sphinxsearch_ui_warning(t('Search query warning: !message', array('!message' => $message)));
-      }
-      if (!empty($results['matches'])) {
-        $query_results = sphinxsearch_parse_query_results($results);
-        unset($results); // Free a little memory.
-        $output .= theme('sphinxsearch_search_results', $query_results);
-      }
-    }
-  }
-  return $output;
-}
-
-/**
- * Generate a UI warning.
- *
- * Displays the message if user has 'administer sphinxsearch' privilege.
- * Otherwise, the warning is logged to watchdog.
- *
- * @param string $message
- */
-function sphinxsearch_ui_warning($message) {
-  if (user_access('administer sphinxsearch')) {
-    drupal_set_message($message, 'error');
-  }
-  else {
-    watchdog('sphinxsearch', $message, WATCHDOG_WARNING);
-  }
-}
-
-/**
- * Parse Sphinx query results into a format that can be easilly themed.
- *
- * @param array $results
- *   All search results as returned by Sphinx query.
- */
-function sphinxsearch_parse_query_results($results) {
-  $query_results = array(
-    'query' => $results['query'],
-    'total_found' => (int)$results['total_found'],
-    'total' => (int)$results['total'],
-    'time' => $results['time'],
-    'words' => $results['words'],
-    'nodes' => array(),
-    'titles' => array(),
-    'excerpts' => array(),
-  );
-
-  // Load nodes references by returned results.
-  foreach ($results['matches'] as $sphinx_docid => $sphinx_match) {
-    if (isset($sphinx_match['attrs']['nid']) && ($node = node_load($sphinx_match['attrs']['nid']))) {
-      $query_results['nodes'][] = $node;
-      $query_results['titles'][] = check_plain($node->title);
-      $query_results['excerpts'][] = sphinxsearch_get_node_text($node);
-    }
-  }
-
-  // Prepare Sphinx client API.
-  $sphinxsearch = sphinxsearch_get_client();
-  $sphinxsearch_excerpts_index = variable_get('sphinxsearch_excerpts_index', '');
-  $sphinxsearch_excerpts_limit = (int)variable_get('sphinxsearch_excerpts_limit', 256);
-
-  // Use Sphinx to build node titles with highlighted keywords.
-  $query_results['titles'] = $sphinxsearch->BuildExcerpts($query_results['titles'], $sphinxsearch_excerpts_index, $query_results['query'], array(
-    'before_match' => '<span class="search-keyword-match">',
-    'after_match' => '</span>',
-    'chunk_separator' => '',
-    'limit' => $sphinxsearch_excerpts_limit,
-    'around' => 100,
-    'exact_phrase' => FALSE,
-    'single_passage' => FALSE,
-  ));
-  if (!$query_results['titles']) {
-    sphinxsearch_ui_warning(t('Unable to build excerpts for node titles. Sphinx error: !message', array('!message' => $sphinxsearch->GetLastError())));
-  }
-
-  // Use Sphinx to build node excerpts with highlighted keywords.
-  $query_results['excerpts'] = $sphinxsearch->BuildExcerpts($query_results['excerpts'], $sphinxsearch_excerpts_index, $query_results['query'], array(
-    'before_match' => '<span class="search-keyword-match">',
-    'after_match' => '</span>',
-    'chunk_separator' => '<span class="search-chunk-separator"> ... </span>',
-    'limit' => $sphinxsearch_excerpts_limit,
-    'around' => 5,
-    'exact_phrase' => FALSE,
-    'single_passage' => FALSE,
-  ));
-  if (!$query_results['excerpts']) {
-    sphinxsearch_ui_warning(t('Unable to build excerpts for node snippets. Sphinx error: !message', array('!message' => $sphinxsearch->GetLastError())));
-  }
-
-  return $query_results;
+  // Transform POST into a GET request.
+  sphinxsearch_goto_search($query_string);
 }
 
 /**
  * Format the results page for the given query results array.
  *
- * @param array $query_results
- *   All search results formatted for easilly theming.
- *   @see sphinxsearch_parse_query_results()
+ * @param array $search_options
+ *   Search options structure.
+ * @param array $search_results
+ *   Search results structure.
  *
  * @ingroup themeable
  */
-function theme_sphinxsearch_search_results($query_results) {
+function theme_sphinxsearch_search_results($search_options, $search_results) {
   // Display information about query execution.
   $output = '<p>';
-  $output .= format_plural($query_results['total_found'], '1 document found', '@count documents found') .' '. t('in @seconds seconds.', array('@seconds' => round($query_results['time'], 3)));
-  if (!empty($query_results['words'])) {
+  $output .= format_plural($search_results['total_found'], '1 document found', '@count documents found') .' '. t('in @seconds seconds.', array('@seconds' => round($search_results['time'], 3)));
+  if (!empty($search_results['words'])) {
     $words = array();
-    foreach ($query_results['words'] as $word => $word_data) {
+    foreach ($search_results['words'] as $word => $word_data) {
       $words[] = '<em>'. check_plain($word) .'</em> ('. t('documents: @docs, hits: @hits', array('@docs' => (int)$word_data['docs'], '@hits' => (int)$word_data['hits'])) .')';
     }
     $output .= ' '. t('Terms found:') .' '. implode('; ', $words) .'.';
   }
   $output .= '</p>' ."\n";
-  if ($query_results['total_found'] != $query_results['total']) {
-    drupal_set_message(t('Warning: only the first @count matches are displayed. You may wish to use additional filters to reduce the number of results.', array('@count' => $query_results['total'])), 'error');
+  if ($search_results['total_found'] != $search_results['total_available']) {
+    drupal_set_message(t('Warning: only the first @count matches are displayed. You may wish to use additional filters to reduce the number of results.', array('@count' => $search_results['total_available'])), 'error');
   }
 
   // Display list of formatted search results.
   $output .= '<dl class="search-results">' ."\n";
-  foreach ($query_results['nodes'] as $item_id => $node) {
-    $title = (isset($query_results['titles'][$item_id]) ? $query_results['titles'][$item_id] : check_plain($node->title));
-    $output .= ' <dt class="title"><a href="'. url('node/'. $node->nid) .'">'. $title .'</a></dt>' ."\n";
+  foreach ($search_results['nodes'] as $item_id => $node) {
+    $title = (isset($search_results['titles'][$item_id]) ? $search_results['titles'][$item_id] : check_plain($node->title));
+    $output .= '<dt class="title">'. l($title, 'node/'. $node->nid, array(), NULL, NULL, FALSE, TRUE) .'</dt>' ."\n";
     $info = array(
       theme('username', $node),
       format_date($node->created, 'small'),
@@ -330,41 +315,21 @@ function theme_sphinxsearch_search_results($query_results) {
     if (!empty($extra) && is_array($extra)) {
       $info = array_merge($info, $extra);
     }
-    $excerpt = (isset($query_results['excerpts'][$item_id]) ? '<p class="search-excerpt">'. $query_results['excerpts'][$item_id] .'</p>' ."\n" : '');
+    $excerpt = (isset($search_results['excerpts'][$item_id]) ? '<p class="search-excerpt">'. $search_results['excerpts'][$item_id] .'</p>' ."\n" : '');
+    if (module_exists('taxonomy') && is_array($node->taxonomy)) {
+      $links = array();
+      foreach ($node->taxonomy as $term) {
+        $links[] = l($term->name, taxonomy_term_path($term));
+      }
+      if (!empty($links)) {
+        $excerpt .= '<p class="search-links">'. t('Tags') .': '. implode(' - ', $links) .'</p>' ."\n";
+      }
+    }
     $output .= '<dd>'. $excerpt .'<p class="search-info">'. implode(' - ', $info) .'</p></dd>' ."\n";
   }
   $output .= '</dl>' ."\n";
 
   // Display pager.
-  $output .= sphinxsearch_pager($query_results['total']);
+  $output .= sphinxsearch_pager($search_results['total_available'], $search_options['results_per_page']);
   return $output;
-}
-
-/**
- * Obtain current page from search results navigation.
- *
- * @return int
- */
-function sphinxsearch_search_get_current_page() {
-  $pager_page_array = explode(',', $_GET['page']);
-  $pager_element = 0;
-  return (isset($pager_page_array[$pager_element]) ? (int)$pager_page_array[$pager_element] : 0);
-}
-
-/**
- * Compute pager options and invoke theme pager.
- *
- * @param int $results_total
- *   Total number of returned search results.
- *
- * @return string
- */
-function sphinxsearch_pager($results_total) {
-  $results_per_page = (int)variable_get('sphinxsearch_results_per_page', 10);
-  $pager_element = 0;
-  $GLOBALS['pager_page_array'] = explode(',', $_GET['page']);
-  $GLOBALS['pager_total_items'][$pager_element] = $results_total;
-  $GLOBALS['pager_total'][$pager_element] = ceil($results_total / $results_per_page);
-  $GLOBALS['pager_page_array'][$pager_element] = max(0, min((int)$GLOBALS['pager_page_array'][$pager_element], ((int)$GLOBALS['pager_total'][$pager_element]) - 1));
-  return theme('pager', array(), $results_per_page, $pager_element);
 }

@@ -1,9 +1,5 @@
-; $Id: sphinxsearch.info,v 1.1 2008/08/18 13:51:28 markuspetrux Exp $
+; $Id: sphinxsearch.info,v 1.2 2008/08/30 06:53:31 markuspetrux Exp $
 name = "sphinxsearch"
 description = "Sphinx search integration for Drupal, based on XMLPipe source type and support for main+delta index scheme."
 package = "sphinxsearch"
 core = "5.x"
-
-version = "5.x-1.0-dev"
-project = "sphinxsearch"
-datestamp = "1217680512"
