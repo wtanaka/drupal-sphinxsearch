@@ -1,5 +1,5 @@
 <?php
-// $Id: sphinxsearch.taxonomy.inc,v 1.2 2008/08/30 06:53:31 markuspetrux Exp $
+// $Id: sphinxsearch.taxonomy.inc,v 1.3 2008/09/12 02:44:22 markuspetrux Exp $
 
 /**
  * @file
@@ -115,8 +115,7 @@ function sphinxsearch_taxonomy_get_terms($vid, $tids) {
       $query_sql .= '= %d';
     }
     else {
-      $placeholders = implode(',', array_fill(0, count($tids), '%d'));
-      $query_sql .= 'IN ('. $placeholders .')';
+      $query_sql .= 'IN ('. db_placeholders($tids) .')';
     }
     $result = db_query(db_rewrite_sql($query_sql, 't', 'tid'), $query_args);
     while ($term = db_fetch_object($result)) {
@@ -134,40 +133,48 @@ function sphinxsearch_taxonomy_get_terms($vid, $tids) {
  * Build tagadelic items for the given options.
  * Tagadelic block (weighted tags cloud).
  *
- * @param array $group_by_options
+ * @param array $build_options
  *   array(
- *     'type' => Grouping type: 'author', 'taxonomy', 'types'
- *     'vid'  => Vocabulary ID when ('type' => 'taxonomy')
+ *     'type'             string   Grouping type: 'author', 'taxonomy', 'types'.
+ *     'vid'              int      Vocabulary ID when grouping type is 'taxonomy'.
+ *     'count'            int      Number of tags to render.
+ *     'levels'           int      Amount of tag-sizes.
+ *     'sortmode'         string   Sort order options.
+ *     'request_options'  array    Requested search options (optional).
+ *     '_faceted_data'    boolean  TRUE when used from sphinxsearch_faceted_build_data().
  *   )
- * @param int $count
- *   Number of tags to render.
- * @param int $levels
- *   Amount of tag-sizes.
- * @param string $sortmode
- *   Sort order options.
- * @param boolean $faceted_search
- *   Use TRUE to build tag links for faceted search (internal use only).
- *   @see sphinxsearch_faceted_block()
- * @param array $request_options
- *   Requested search options (optional).
  *
  * @return array
  *   Hash of tagadelic items.
  */
-function sphinxsearch_tagadelic_build_data($group_by_options, $count = 20, $levels = 10, $sortmode = 'title,asc', $faceted_search = FALSE, $request_options = array()) {
+function sphinxsearch_tagadelic_build_data($build_options) {
+  // Check options.
+  if (!isset($build_options['count']) || !is_numeric($build_options['count'])) {
+    $build_options['count'] = 20;
+  }
+  if (!isset($build_options['levels']) || !is_numeric($build_options['levels'])) {
+    $build_options['levels'] = 10;
+  }
+  if (!isset($build_options['sortmode'])) {
+    $build_options['sortmode'] = 'title,asc';
+  }
+  if (!isset($build_options['request_options']) || !is_array($build_options['request_options'])) {
+    $build_options['request_options'] = array();
+  }
+
   // Build search options structure.
-  $search_options = sphinxsearch_parse_request($request_options);
+  $search_options = sphinxsearch_parse_request($build_options['request_options']);
   $search_filters = array();
-  if ($group_by_options['type'] == 'author') {
+  if ($build_options['type'] == 'author') {
     if (!empty($search_options['filters']['author'])) {
       $author = new stdClass();
       $author->uid = $search_options['filters']['author']['uid'];
       $author->name = $search_options['filters']['author']['name'];
       $search_filters[$author->uid] = $author;
     }
-    $group_by_options['group_by_field'] = 'uid';
+    $build_options['group_by_field'] = 'uid';
   }
-  else if ($group_by_options['type'] == 'types') {
+  else if ($build_options['type'] == 'types') {
     if (!isset($search_options['filters']['types'])) {
       $search_options['filters']['types'] = array();
     }
@@ -179,10 +186,10 @@ function sphinxsearch_tagadelic_build_data($group_by_options, $count = 20, $leve
         $search_filters[$node_type->type] = $node_type;
       }
     }
-    $group_by_options['group_by_field'] = 'nodetype';
+    $build_options['group_by_field'] = 'nodetype';
   }
-  else if ($group_by_options['type'] == 'taxonomy') {
-    $vid = $group_by_options['vid'];
+  else if ($build_options['type'] == 'taxonomy') {
+    $vid = (int)$build_options['vid'];
     if (!isset($search_options['filters']['taxonomy'])) {
       $search_options['filters']['taxonomy'] = array($vid => array());
     }
@@ -190,21 +197,21 @@ function sphinxsearch_tagadelic_build_data($group_by_options, $count = 20, $leve
       $search_options['filters']['taxonomy'][$vid] = array();
     }
     $search_filters = $search_options['filters']['taxonomy'][$vid];
-    $group_by_options['group_by_field'] = 'terms'. $vid;
+    $build_options['group_by_field'] = 'terms'. $vid;
   }
   else {
     return FALSE;
   }
 
   // Results count should include number of items specified in filters.
-  $count += count($search_filters);
+  $count = (int)$build_options['count'] + count($search_filters);
 
   // Execute a GroupBy query based on current search options.
   $search_results = sphinxsearch_execute_query(array_merge($search_options, array(
     'results_per_page' => $count,
-    'group_by' => $group_by_options['group_by_field'],
+    'group_by' => $build_options['group_by_field'],
   )));
-  if ($search_results['total_available'] <= 0 && !$faceted_search) {
+  if ($search_results['total_available'] <= 0 && empty($build_options['_faceted_data'])) {
     return FALSE;
   }
 
@@ -215,7 +222,7 @@ function sphinxsearch_tagadelic_build_data($group_by_options, $count = 20, $leve
       $generic_groups[$tid] = $group_info;
     }
   }
-  if (count($generic_groups) <= 1 && !$faceted_search) {
+  if (count($generic_groups) <= 1 && empty($build_options['_faceted_data'])) {
     return FALSE;
   }
   unset($search_results);
@@ -231,22 +238,21 @@ function sphinxsearch_tagadelic_build_data($group_by_options, $count = 20, $leve
   // Transform search results into tagadelic items.
   $generic_terms = array();
   if (!empty($generic_groups)) {
-    if ($group_by_options['type'] == 'author') {
+    if ($build_options['type'] == 'author') {
       $uids = array_keys($generic_groups);
       $sql = 'SELECT uid, name FROM {users} WHERE uid ';
       if (count($uids) == 1) {
         $sql .= '= %d';
       }
       else {
-        $placeholders = implode(',', array_fill(0, count($uids), '%d'));
-        $sql .= 'IN ('. $placeholders .')';
+        $sql .= 'IN ('. db_placeholders($uids) .')';
       }
       $result = db_query($sql, $uids);
       while ($row = db_fetch_object($result)) {
         $generic_terms[$row->uid] = $row;
       }
     }
-    else if ($group_by_options['type'] == 'types') {
+    else if ($build_options['type'] == 'types') {
       foreach (array_keys($generic_groups) as $type) {
         $node_type = new stdClass();
         $node_type->type = $type;
@@ -254,7 +260,7 @@ function sphinxsearch_tagadelic_build_data($group_by_options, $count = 20, $leve
         $generic_terms[$node_type->type] = $node_type;
       }
     }
-    else if ($group_by_options['type'] == 'taxonomy') {
+    else if ($build_options['type'] == 'taxonomy') {
       $generic_terms = sphinxsearch_taxonomy_get_terms($vid, array_keys($generic_groups));
     }
   }
@@ -273,7 +279,7 @@ function sphinxsearch_tagadelic_build_data($group_by_options, $count = 20, $leve
       $tags[$tid] = $tag;
     }
   }
-  if (empty($tags) && !$faceted_search) {
+  if (empty($tags) && empty($build_options['_faceted_data'])) {
     return FALSE;
   }
   unset($generic_groups, $generic_terms);
@@ -282,11 +288,30 @@ function sphinxsearch_tagadelic_build_data($group_by_options, $count = 20, $leve
   // the largest element is rounded down.
   $range = max(.01, $max - $min) * 1.0001;
   foreach ($tags as $tid => $tag) {
-    $tags[$tid]->tagadelic_weight = 1 + floor($levels * ($tag->tagadelic_count - $min) / $range);
+    $tags[$tid]->tagadelic_weight = 1 + floor((int)$build_options['levels'] * ($tag->tagadelic_count - $min) / $range);
+
+    // Compute faceted search path/query string for each tag.
+    if (!empty($build_options['linkto']) && $build_options['linkto'] == 'search') {
+      $faceted_search_options = $search_options;
+      if ($build_options['type'] == 'author') {
+        $faceted_search_options['filters']['author'] = array('uid' => $tag->uid, 'name' => $tag->name);
+      }
+      else if ($build_options['type'] == 'types') {
+        $faceted_search_options['filters']['types'][] = $tag->type;
+      }
+      else if ($build_options['type'] == 'taxonomy') {
+        $vid = $build_options['vid'];
+        if (!isset($faceted_search_options['filters']['taxonomy'][$vid][$tid])) {
+          $faceted_search_options['filters']['taxonomy'][$vid][$tid] = $tag;
+        }
+      }
+      $tags[$tid]->faceted_path = sphinxsearch_get_search_path();
+      $tags[$tid]->faceted_query = sphinxsearch_get_query_string($faceted_search_options);
+    }
   }
 
   // Sort tags.
-  list($sort_by, $sort_order) = explode(',', $sortmode);
+  list($sort_by, $sort_order) = explode(',', $build_options['sortmode']);
   switch ($sort_by) {
     case 'title':
       usort($tags, create_function('$a,$b', 'return strnatcasecmp($a->name, $b->name);'));
@@ -304,7 +329,7 @@ function sphinxsearch_tagadelic_build_data($group_by_options, $count = 20, $leve
 
   // Additional faceted search processing (internal use only).
   // @see sphinxsearch_faceted_block()
-  if ($faceted_search) {
+  if (!empty($build_options['_faceted_data'])) {
     // Return weighted tags, filtered items and search options.
     return array($tags, $filtered_items, $search_options);
   }
@@ -328,11 +353,13 @@ function sphinxsearch_tagadelic_page($vids = NULL) {
   }
   $blocks = array();
   foreach ($vids as $vid) {
-    $tags = sphinxsearch_tagadelic_build_data(array('type' => 'taxonomy', 'vid' => $vid),
-      (int)variable_get('sphinxsearch_page_tagadelic_tags', 100),
-      (int)variable_get('sphinxsearch_page_tagadelic_levels', 10),
-      variable_get('sphinxsearch_page_tagadelic_sortmode', 'title,asc')
-    );
+    $tags = sphinxsearch_tagadelic_build_data(array(
+      'type' => 'taxonomy', 'vid' => $vid,
+      'count' => (int)variable_get('sphinxsearch_page_tagadelic_tags', 100),
+      'levels' => (int)variable_get('sphinxsearch_page_tagadelic_levels', 10),
+      'sortmode' => variable_get('sphinxsearch_page_tagadelic_sortmode', 'title,asc'),
+      'linkto' => variable_get('sphinxsearch_page_tagadelic_linkto', 'taxonomy'),
+    ));
     if (!empty($tags)) {
       $blocks[$vid] = array(
         'vocabulary' => $vocabularies[$vid],
@@ -350,30 +377,44 @@ function sphinxsearch_tagadelic_page($vids = NULL) {
 /**
  * Build faceted items for the given options.
  *
- * @param array $vocabularies
- *   Hash of vocabularies to include in the block.
- * @param int $count
- *   Number of tags to render per vocabulary.
- * @param int $levels
- *   Amount of tag-sizes.
- * @param string $sortmode
- *   Sort order options.
- * @param array $request_options
- *   Requested search options (optional).
+ * @param array $build_options
+ *   array(
+ *     'count'            int      Number of tags to render per facet.
+ *     'levels'           int      Amount of tag-sizes.
+ *     'sortmode'         string   Sort order options.
+ *     'request_options'  array    Requested search options (optional).
+ *   )
  *
  * @return array
  *   List of facets.
  */
-function sphinxsearch_faceted_build_data($count = 20, $levels = 10, $sortmode = 'title,asc', $request_options = NULL) {
-  if (!isset($request_options)) {
-    $request_options = $_GET;
+function sphinxsearch_faceted_build_data($build_options) {
+  // Check options.
+  if (!isset($build_options['count']) || !is_numeric($build_options['count'])) {
+    $build_options['count'] = 20;
   }
+  if (!isset($build_options['levels']) || !is_numeric($build_options['levels'])) {
+    $build_options['levels'] = 10;
+  }
+  if (!isset($build_options['sortmode'])) {
+    $build_options['sortmode'] = 'title,asc';
+  }
+  if (!isset($build_options['request_options']) || !is_array($build_options['request_options'])) {
+    $build_options['request_options'] = $_GET;
+  }
+
+  // Append faceted search options.
+  $build_options['linkto'] = 'search';
+  $build_options['_faceted_data'] = TRUE;
 
   $faceted_blocks = array();
 
   // Build facets by taxonomy.
   foreach (sphinxsearch_get_enabled_vocabularies() as $vid => $vocabulary) {
-    list($tags, $filtered_items, $search_options) = sphinxsearch_tagadelic_build_data(array('type' => 'taxonomy', 'vid' => $vid), $count, $levels, $sortmode, TRUE, $request_options);
+    list($tags, $filtered_items, $search_options) = sphinxsearch_tagadelic_build_data(array_merge($build_options, array(
+      'type' => 'taxonomy',
+      'vid' => $vid,
+    )));
     $faceted_blocks[] = array(
       'type' => 'taxonomy', 'vid' => $vid,
       'title' => $vocabulary->name,
@@ -384,7 +425,9 @@ function sphinxsearch_faceted_build_data($count = 20, $levels = 10, $sortmode = 
   }
 
   // Build facets by node type.
-  list($tags, $filtered_items, $search_options) = sphinxsearch_tagadelic_build_data(array('type' => 'types'), $count, $levels, $sortmode, TRUE, $request_options);
+  list($tags, $filtered_items, $search_options) = sphinxsearch_tagadelic_build_data(array_merge($build_options, array(
+    'type' => 'types',
+  )));
   $faceted_blocks[] = array(
     'type' => 'types',
     'title' => t('Content type'),
@@ -394,7 +437,9 @@ function sphinxsearch_faceted_build_data($count = 20, $levels = 10, $sortmode = 
   );
 
   // Build facets by author.
-  list($tags, $filtered_items, $search_options) = sphinxsearch_tagadelic_build_data(array('type' => 'author'), $count, $levels, $sortmode, TRUE, $request_options);
+  list($tags, $filtered_items, $search_options) = sphinxsearch_tagadelic_build_data(array_merge($build_options, array(
+    'type' => 'author',
+  )));
   $faceted_blocks[] = array(
     'type' => 'author',
     'title' => t('Author'),
@@ -405,30 +450,16 @@ function sphinxsearch_faceted_build_data($count = 20, $levels = 10, $sortmode = 
 
   $facets = array();
   foreach ($faceted_blocks as $facet_data) {
-    $facet = new stdClass();
-
-    // Compute faceted search path/query string for each tag.
-    if (!empty($facet_data['tags'])) {
-      foreach ($facet_data['tags'] as $i => $tag) {
-        $faceted_search_options = $facet_data['search_options'];
-        if ($facet_data['type'] == 'author') {
-          $faceted_search_options['filters']['author'] = array('uid' => $tag->uid, 'name' => $tag->name);
-        }
-        else if ($facet_data['type'] == 'types') {
-          $faceted_search_options['filters']['types'][] = $tag->type;
-        }
-        else if ($facet_data['type'] == 'taxonomy') {
-          if (!isset($faceted_search_options['filters']['taxonomy'][$facet_data['vid']][$tag->tid])) {
-            $faceted_search_options['filters']['taxonomy'][$facet_data['vid']][$tag->tid] = $tag;
-          }
-        }
-        $facet_data['tags'][$i]->faceted_path = sphinxsearch_get_search_path();
-        $facet_data['tags'][$i]->faceted_query = sphinxsearch_get_query_string($faceted_search_options);
-      }
-      $facet->tags = $facet_data['tags'];
+    if (empty($facet_data['tags']) && empty($facet_data['filtered_items'])) {
+      continue;
     }
 
-    // Compute faceted search path/query string for each term and the facet itself.
+    $facet = new stdClass();
+    $facet->type = $facet_data['type'];
+    $facet->title = $facet_data['title'];
+    $facet->tags = $facet_data['tags'];
+
+    // Compute search path/query string for facet filters.
     if (!empty($facet_data['filtered_items'])) {
       $reversed_terms = array_reverse($facet_data['filtered_items'], TRUE);
       $remaining_terms = $facet_data['filtered_items'];
@@ -463,11 +494,7 @@ function sphinxsearch_faceted_build_data($count = 20, $levels = 10, $sortmode = 
       $facet->terms = $facet_data['filtered_items'];
     }
 
-    if (!empty($facet->tags) || !empty($facet->terms)) {
-      $facet->type = $facet_data['type'];
-      $facet->title = $facet_data['title'];
-      $facets[] = $facet;
-    }
+    $facets[] = $facet;
   }
   return $facets;
 }
@@ -489,13 +516,13 @@ function theme_sphinxsearch_faceted_block($facets) {
       $links = array();
       $last_term = array_pop($facet->terms);
       foreach ($facet->terms as $tid => $term) {
-        $url = url($term->faceted_path, $term->faceted_query);
+        $url = url($term->faceted_path, array('query' => $term->faceted_query));
         $link = '<span><a href="'. $url .'">'. check_plain($term->name) .'</a></span>';
         $links[] = $link;
       }
       $links[] = '<span class="faceted-superset-youarehere">'. check_plain($last_term->name) .'</span>';
       if (!empty($links)) {
-        $url = url($facet->path, $facet->query);
+        $url = url($facet->path, array('query' => $facet->query));
         $link = '<span><a href="'. $url .'">'. t('All') .'</a></span>';
         $superset[] = '<div><strong>'. check_plain($facet->title) .':</strong> '. implode(' › ', array_merge(array($link), $links)) .'</div>';
       }
@@ -537,7 +564,7 @@ function theme_sphinxsearch_tagadelic_block($tags) {
     if (!empty($tag->tagadelic_items)) {
       $attributes['title'] = $tag->name .' ('. $tag->tagadelic_items .')';
     }
-    $url = (!empty($tag->faceted_path) ? url($tag->faceted_path, $tag->faceted_query) : url(taxonomy_term_path($tag)));
+    $url = (!empty($tag->faceted_path) ? url($tag->faceted_path, array('query' => $tag->faceted_query)) : url(taxonomy_term_path($tag)));
     $output .= '<a href="'. $url .'"'. drupal_attributes($attributes) .'>'. check_plain($tag->name) .'</a>' ."\n";
   }
 

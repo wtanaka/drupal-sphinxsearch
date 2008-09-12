@@ -1,5 +1,5 @@
 <?php
-// $Id: sphinxsearch_xmlpipe.php,v 1.2 2008/08/30 06:53:32 markuspetrux Exp $
+// $Id: sphinxsearch_xmlpipe.php,v 1.3 2008/09/12 02:44:22 markuspetrux Exp $
 
 /**
  * @file

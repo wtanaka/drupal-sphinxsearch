@@ -1,5 +1,5 @@
 <?php
-// $Id: sphinxsearch.module,v 1.4 2008/08/30 06:53:31 markuspetrux Exp $
+// $Id: sphinxsearch.module,v 1.5 2008/09/12 02:44:22 markuspetrux Exp $
 
 /**
  * @file
@@ -10,8 +10,8 @@
 /**
  * Implementation of hook_help().
  */
-function sphinxsearch_help($section) {
-  switch ($section) {
+function sphinxsearch_help($path, $arg) {
+  switch ($path) {
     case 'admin/help#sphinxsearch':
       $output = '<p>'. t('Sphinx search module provides a fast and scalable alternative to Drupal core search for content. Sphinx search implementation is based on XMLPipe source type and support for main+delta index scheme.') .'</p>';
       return $output;
@@ -27,6 +27,29 @@ function sphinxsearch_help($section) {
 }
 
 /**
+ * Implementation of hook_theme()
+ */
+function sphinxsearch_theme() {
+  return array(
+    'sphinxsearch_search_results' => array(
+      'arguments' => array('search_options' => NULL, 'search_results' => NULL),
+    ),
+    'sphinxsearch_faceted_block' => array(
+      'arguments' => array('facets' => NULL),
+    ),
+    'sphinxsearch_tagadelic_block' => array(
+      'arguments' => array('tags' => NULL),
+    ),
+    'sphinxsearch_tagadelic_more' => array(
+      'arguments' => array('vid' => NULL),
+    ),
+    'sphinxsearch_tagadelic_page' => array(
+      'arguments' => array('blocks' => NULL),
+    ),
+  );
+}
+
+/**
  * Implementation of hook_perm().
  */
 function sphinxsearch_perm() {
@@ -34,69 +57,60 @@ function sphinxsearch_perm() {
 }
 
 /**
- * Implementation of hook_menu().
+ * Implementation of hook_init().
  */
-function sphinxsearch_menu($may_cache) {
-  $items = array();
-
+function sphinxsearch_init() {
+  // Load module common functions.
   $module_path = drupal_get_path('module', 'sphinxsearch');
   require_once($module_path .'/sphinxsearch.common.inc');
   require_once($module_path .'/sphinxsearch.taxonomy.inc');
 
-  if ($may_cache) {
-    $admin_access = user_access('administer sphinxsearch');
-    $usage_access = user_access('use sphinxsearch');
-    $items[] = array(
-      'path' => 'admin/settings/sphinxsearch',
-      'title' => t('Sphinx search'),
-      'callback' => 'drupal_get_form',
-      'callback arguments' => 'sphinxsearch_settings',
-      'access' => $admin_access,
-    );
-    $items[] = array(
-      'path' => 'admin/settings/sphinxsearch/settings',
-      'title' => t('Settings'),
-      'description' => t('Administer Sphinx search module settings'),
-      'access' => $admin_access,
-      'weight' => -10,
-      'type' => MENU_DEFAULT_LOCAL_TASK,
-    );
-    $items[] = array(
-      'path' => 'admin/settings/sphinxsearch/check-connection',
-      'title' => t('Check connection'),
-      'description' => t('Check connection to Sphinx searchd daemon'),
-      'callback' => 'sphinxsearch_check_connection_page',
-      'access' => $admin_access,
-      'weight' => 10,
-      'type' => MENU_LOCAL_TASK,
-    );
-    $items[] = array(
-      'path' => sphinxsearch_get_search_path(),
-      'title' => t('Search'),
-      'callback' => 'sphinxsearch_search_page',
-      'access' => $usage_access,
+  // We need our own CSS in all pages because of tagadelic and similar blocks.
+  drupal_add_css($module_path .'/sphinxsearch.css');
+}
+
+/**
+ * Implementation of hook_menu().
+ */
+function sphinxsearch_menu() {
+  $items = array();
+  $items['admin/settings/sphinxsearch'] = array(
+    'title' => 'Sphinx search',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('sphinxsearch_settings'),
+    'access arguments' => array('administer sphinxsearch'),
+    'file' => 'sphinxsearch.admin.inc',
+  );
+  $items['admin/settings/sphinxsearch/settings'] = array(
+    'title' => 'Settings',
+    'description' => 'Administer Sphinx search module settings',
+    'access arguments' => array('administer sphinxsearch'),
+    'weight' => -10,
+    'type' => MENU_DEFAULT_LOCAL_TASK,
+  );
+  $items['admin/settings/sphinxsearch/check-connection'] = array(
+    'title' => 'Check connection',
+    'description' => 'Check connection to Sphinx searchd daemon',
+    'page callback' => 'sphinxsearch_check_connection_page',
+    'access arguments' => array('administer sphinxsearch'),
+    'weight' => 10,
+    'type' => MENU_LOCAL_TASK,
+    'file' => 'sphinxsearch.admin.inc',
+  );
+  $items[sphinxsearch_get_search_path()] = array(
+    'title' => 'Search',
+    'page callback' => 'sphinxsearch_search_page',
+    'access arguments' => array('use sphinxsearch'),
+    'type' => MENU_SUGGESTED_ITEM,
+    'file' => 'sphinxsearch.pages.inc',
+  );
+  if (module_exists('taxonomy') && !module_exists('tagadelic')) {
+    $items['tagadelic'] = array(
+      'title' => 'Tags',
+      'page callback' => 'sphinxsearch_tagadelic_page',
+      'access arguments' => array('use sphinxsearch'),
       'type' => MENU_SUGGESTED_ITEM,
     );
-    if (module_exists('taxonomy') && !module_exists('tagadelic')) {
-      $items[] = array(
-        'title' => t('Tags'),
-        'path' => 'tagadelic',
-        'callback' => 'sphinxsearch_tagadelic_page',
-        'access' => $usage_access,
-        'type' => MENU_SUGGESTED_ITEM,
-      );
-    }
-  }
-  else {
-    if (arg(0) == 'admin' && arg(1) == 'settings' && arg(2) == 'sphinxsearch') {
-      require_once($module_path .'/sphinxsearch.admin.inc');
-    }
-    else if (sphinxsearch_is_search_path()) {
-      require_once($module_path .'/sphinxsearch.pages.inc');
-    }
-
-    // We need our own CSS in all pages because of tagadelic and similar blocks.
-    drupal_add_css($module_path .'/sphinxsearch.css');
   }
   return $items;
 }
@@ -152,6 +166,18 @@ function sphinxsearch_block($op = 'list', $delta = 0, $edit = array()) {
             '#default_value' => variable_get('sphinxsearch_block_'. $blockmode .'_levels'. $suffix, 10),
             '#description' => t('The number of levels between the least popular tags and the most popular ones. Different levels will be assigned a different class to be themed (see <code>sphinxsearch.css</code>).'),
           );
+          if ($blockmode == 'tagadelic') {
+            $form['linkto'] = array(
+              '#type' => 'radios',
+              '#title' => t('Terms in the cloud link to'),
+              '#options' => array(
+                'taxonomy' => t('Taxonomy managed.'),
+                'search' => t('Search results with predefined filters.'),
+              ),
+              '#default_value' => variable_get('sphinxsearch_block_'. $blockmode .'_linkto'. $suffix, 'search'),
+              '#description' => t('Determines where the links of terms in the tag cloud should point to.'),
+            );
+          }
           return $form;
         }
       }
@@ -168,11 +194,17 @@ function sphinxsearch_block($op = 'list', $delta = 0, $edit = array()) {
           variable_set('sphinxsearch_block_'. $blockmode .'_sortmode'. $suffix, $edit['sortmode']);
           variable_set('sphinxsearch_block_'. $blockmode .'_tags'. $suffix, $edit['tags']);
           variable_set('sphinxsearch_block_'. $blockmode .'_levels'. $suffix, $edit['levels']);
+          if ($blockmode == 'tagadelic') {
+            variable_set('sphinxsearch_block_'. $blockmode .'_linkto'. $suffix, $edit['linkto']);
+          }
         }
       }
     }
   }
-  else if ($op == 'view' && user_access('use sphinxsearch')) {
+  else if ($op == 'view') {
+    if (!user_access('use sphinxsearch') || sphinxsearch_flood_limit_exceeded()) {
+      return;
+    }
     if ($delta == 'searchbox') {
       // Hide block if current page is search.
       if (!sphinxsearch_is_search_path()) {
@@ -182,41 +214,41 @@ function sphinxsearch_block($op = 'list', $delta = 0, $edit = array()) {
         );
       }
     }
-    else {
-      if (preg_match('#^(faceted|tags([0-9]+))$#', $delta, $match)) {
-        $vid = (isset($match[2]) ? (int)$match[2] : 0);
-        $blockmode = ($match[1] == 'faceted' ? 'faceted' : 'tagadelic');
-        if ($blockmode == 'tagadelic') {
-          // Tagadelic box for selected vocabulary.
-          $vocabularies = sphinxsearch_get_enabled_vocabularies();
-          if (isset($vocabularies[$vid])) {
-            $tags = sphinxsearch_tagadelic_build_data(array('type' => 'taxonomy', 'vid' => $vid),
-              (int)variable_get('sphinxsearch_block_tagadelic_tags_'. $vid, 20),
-              (int)variable_get('sphinxsearch_block_tagadelic_levels_'. $vid, 10),
-              variable_get('sphinxsearch_block_tagadelic_sortmode_'. $vid, 'title,asc')
-            );
-            if (!empty($tags)) {
-              $content = theme('sphinxsearch_tagadelic_block', $tags);
-              if (variable_get('sphinxsearch_page_tagadelic_tags', 100) > variable_get('sphinxsearch_block_tagadelic_tags_'. $vid, 20)) {
-                $content .= theme('sphinxsearch_tagadelic_more', $vid);
-              }
-              return array('content' => $content, 'subject' => t('Tags in @vocabulary', array('@vocabulary' => $vocabularies[$vid]->name)));
+    else if (preg_match('#^(faceted|tags([0-9]+))$#', $delta, $match)) {
+      $vid = (isset($match[2]) ? (int)$match[2] : 0);
+      $blockmode = ($match[1] == 'faceted' ? 'faceted' : 'tagadelic');
+      if ($blockmode == 'tagadelic') {
+        // Tagadelic box for selected vocabulary.
+        $vocabularies = sphinxsearch_get_enabled_vocabularies();
+        if (isset($vocabularies[$vid])) {
+          $tags = sphinxsearch_tagadelic_build_data(array(
+            'type' => 'taxonomy', 'vid' => $vid,
+            'count' => (int)variable_get('sphinxsearch_block_tagadelic_tags_'. $vid, 20),
+            'levels' => (int)variable_get('sphinxsearch_block_tagadelic_levels_'. $vid, 10),
+            'sortmode' => variable_get('sphinxsearch_block_tagadelic_sortmode_'. $vid, 'title,asc'),
+            'linkto' => variable_get('sphinxsearch_block_tagadelic_linkto_'. $vid, 'search'),
+          ));
+          if (!empty($tags)) {
+            $content = theme('sphinxsearch_tagadelic_block', $tags);
+            if (variable_get('sphinxsearch_page_tagadelic_tags', 100) > variable_get('sphinxsearch_block_tagadelic_tags_'. $vid, 20)) {
+              $content .= theme('sphinxsearch_tagadelic_more', $vid);
             }
+            return array('content' => $content, 'subject' => t('Tags in @vocabulary', array('@vocabulary' => $vocabularies[$vid]->name)));
           }
         }
-        else if ($blockmode == 'faceted') {
-          // Faceted search box for all supported grouping methods.
-          // Rendered only within the context of search pages.
-          if (sphinxsearch_is_search_path()) {
-            $facets = sphinxsearch_faceted_build_data(
-              (int)variable_get('sphinxsearch_block_faceted_tags', 20),
-              (int)variable_get('sphinxsearch_block_faceted_levels', 10),
-              variable_get('sphinxsearch_block_faceted_sortmode', 'title,asc')
-            );
-            if (!empty($facets)) {
-              $content = theme('sphinxsearch_faceted_block', $facets);
-              return array('content' => $content, 'subject' => t('Faceted search'));
-            }
+      }
+      else if ($blockmode == 'faceted') {
+        // Faceted search box for all supported grouping methods.
+        // Rendered only within the context of search pages.
+        if (sphinxsearch_is_search_path()) {
+          $facets = sphinxsearch_faceted_build_data(array(
+            'count' => (int)variable_get('sphinxsearch_block_faceted_tags', 20),
+            'levels' => (int)variable_get('sphinxsearch_block_faceted_levels', 10),
+            'sortmode' => variable_get('sphinxsearch_block_faceted_sortmode', 'title,asc'),
+          ));
+          if (!empty($facets)) {
+            $content = theme('sphinxsearch_faceted_block', $facets);
+            return array('content' => $content, 'subject' => t('Faceted search'));
           }
         }
       }
@@ -238,16 +270,15 @@ function sphinxsearch_search_box() {
     '#attributes' => array('title' => t('Enter the terms you wish to search for.')),
   );
   $form['inline']['submit'] = array('#type' => 'submit', '#value' => t('Search'));
-  $form['#action'] = url(sphinxsearch_get_search_path());
   return $form;
 }
 
 /**
  * Process a search box form submission.
  */
-function sphinxsearch_search_box_submit($form_id, $form_values) {
+function sphinxsearch_search_box_submit($form, &$form_state) {
   $query = array();
-  $keys = preg_replace('#\s+#', ' ', trim($form_values['keys']));
+  $keys = preg_replace('#\s+#', ' ', trim($form_state['values']['keys']));
   if (!empty($keys)) {
     $query['keys'] = $keys;
   }
@@ -288,10 +319,10 @@ function sphinxsearch_delete_node_from_index($nid) {
 
   // Note: count should be number of updated documents, -1 if error.
   if ($count <= 0) {
-    watchdog('sphinxsearch', t('Node @nid could not be deleted from Sphinx index. Sphinx error message: !message', array(
+    watchdog('sphinxsearch', 'Node @nid could not be deleted from Sphinx index. Sphinx error message: !message', array(
       '@nid' => $nid,
       '!message' => $sphinxsearch->GetLastError()
-    )), WATCHDOG_WARNING);
+    ), WATCHDOG_WARNING);
   }
 }
 
@@ -444,7 +475,7 @@ function sphinxsearch_get_enabled_node_types_condition($table_alias = '') {
     $enabled_node_types = sphinxsearch_get_enabled_node_types();
     if (!empty($enabled_node_types)) {
       if (count($enabled_node_types) == 1) {
-        $condition .= '= \'%s\'';
+        $condition .= "= '". db_escape_string($enabled_node_types[0]) ."'";
       }
       else {
         $types = array();

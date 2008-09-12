@@ -1,5 +1,5 @@
 <?php
-// $Id: sphinxsearch.admin.inc,v 1.3 2008/08/30 06:53:31 markuspetrux Exp $
+// $Id: sphinxsearch.admin.inc,v 1.4 2008/09/12 02:44:22 markuspetrux Exp $
 
 /**
  * @file
@@ -213,6 +213,35 @@ function sphinxsearch_settings() {
     '#options' => drupal_map_assoc(array(5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 60, 70, 80, 90, 100)),
     '#description' => t('How many items will be shown on search results page.'),
   );
+  $form['search']['results']['sphinxsearch_log_search_keys'] = array(
+    '#type' => 'radios',
+    '#title' => t('Log search keys'),
+    '#default_value' => variable_get('sphinxsearch_log_search_keys', 'always'),
+    '#options' => array(
+      'always' => t('Always'),
+      'keys-only' => t('Only when keywords have been specified'),
+      'never' => t('Never'),
+    ),
+    '#description' => t('Information about search requests can be logged to watchdog for later review. Use this option to disable this feature or to only enable logging for requests where search keywords have been specified. Note that you can also setup Sphinx to log all search queries (see parameter <code>query_log</code> in your sphinx.conf), in which case you may wish to disable this feature here.'),
+  );
+  $form['search']['flood'] = array(
+    '#type' => 'fieldset',
+    '#title' => t('Flood control settings'),
+    '#collapsible' => TRUE, '#collapsed' => TRUE,
+    '#description' => t('Use these options to set the maximum number of search queries a user can perform per hour. Users with %admin permission are not affected by these restrictions.', array('%admin' => t('administer sphinxsearch'))),
+  );
+  $user_roles = array(DRUPAL_ANONYMOUS_RID => t('anonymous user'), DRUPAL_AUTHENTICATED_RID => t('authenticated user'));
+  foreach ($user_roles as $rid => $role) {
+    $form['search']['flood']['sphinxsearch_search_flood_per_role_'. $rid] = array(
+      '#type' => 'select',
+      '#title' => t('Hourly threshold per %role', array('%role' => $role)),
+      '#options' => (
+        array(0 => t('Unlimited')) +
+        drupal_map_assoc(array(10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120, 130, 140, 150, 160, 170, 180, 190, 200, 210, 220, 230, 240, 250, 260, 270, 280, 290, 300, 350, 400, 450, 500))
+      ),
+      '#default_value' => variable_get('sphinxsearch_search_flood_per_role_'. $rid, 0),
+    );
+  }
   $form['search']['excerpts'] = array(
     '#type' => 'fieldset',
     '#title' => t('Excerpts builder settings'),
@@ -274,6 +303,16 @@ function sphinxsearch_settings() {
       '#default_value' => variable_get('sphinxsearch_page_tagadelic_levels', 10),
       '#description' => t('The number of levels between the least popular tags and the most popular ones. Different levels will be assigned a different class to be themed (see <code>sphinxsearch.css</code>).'),
     );
+    $form['search']['tagadelic']['sphinxsearch_page_tagadelic_linkto'] = array(
+      '#type' => 'radios',
+      '#title' => t('Terms in the cloud link to'),
+      '#options' => array(
+        'taxonomy' => t('Taxonomy managed links.'),
+        'search' => t('Start search with predefined filters.'),
+      ),
+      '#default_value' => variable_get('sphinxsearch_page_tagadelic_linkto', 'taxonomy'),
+      '#description' => t('Determines where the links of terms in the tag cloud should point to.'),
+    );
   }
   return system_settings_form($form);
 }
@@ -281,16 +320,25 @@ function sphinxsearch_settings() {
 /**
  * Validate module settings form.
  */
-function sphinxsearch_settings_validate($form_id, $form_values) {
-  if (!is_numeric($form_values['sphinxsearch_searchd_port']) || (int)$form_values['sphinxsearch_searchd_port'] < 0) {
+function sphinxsearch_settings_validate($form, &$form_state) {
+  if (!is_numeric($form_state['values']['sphinxsearch_searchd_port']) || (int)$form_state['values']['sphinxsearch_searchd_port'] < 0) {
     form_set_error('sphinxsearch_searchd_port', t('Sphinx port must be a numeric positive value.'));
   }
-  $search_path = variable_get('sphinxsearch_search_path', 'search-content');
-  if (strpos($search_path, ' ') !== FALSE) {
+  if (strpos($form_state['values']['sphinxsearch_search_path'], ' ') !== FALSE) {
     form_set_error('sphinxsearch_search_path', t('Search path cannot contain whitespaces.'));
   }
-  else if ($search_path == 'search' && module_exists('search')) {
+  else if ($form_state['values']['sphinxsearch_search_path'] == 'search' && module_exists('search')) {
     form_set_error('sphinxsearch_search_path', t("You should first uninstall the Drupal search module to be able to take over the <code>'search'</code> path."));
+  }
+}
+
+/**
+ * Submit handler for module settings form.
+ */
+function sphinxsearch_settings_submit($form, &$form_state) {
+  // Rebuild menus when search page path has been changed.
+  if ($form_state['values']['sphinxsearch_search_path'] != variable_get('sphinxsearch_search_path', 'search-content')) {
+    menu_rebuild();
   }
 }
 
@@ -299,6 +347,10 @@ function sphinxsearch_settings_validate($form_id, $form_values) {
  */
 function sphinxsearch_check_connection_page() {
   $steps = array();
+
+  $sphinxsearch = &sphinxsearch_get_client();
+  $sphinxsearch_query_index = variable_get('sphinxsearch_query_index', '');
+  $sphinxsearch_excerpts_index = variable_get('sphinxsearch_excerpts_index', '');
 
   // Check connection.
   $steps['connection'] = array(
@@ -315,10 +367,6 @@ function sphinxsearch_check_connection_page() {
       t('Sphinx message: %message', array('%message' => $sphinxsearch->GetLastError())),
     ));
   }
-
-  $sphinxsearch = &sphinxsearch_get_client();
-  $sphinxsearch_query_index = variable_get('sphinxsearch_query_index', '');
-  $sphinxsearch_excerpts_index = variable_get('sphinxsearch_excerpts_index', '');
 
   // Check distributed index.
   $steps['query'] = array(

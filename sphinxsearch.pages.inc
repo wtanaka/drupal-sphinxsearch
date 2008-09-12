@@ -1,5 +1,5 @@
 <?php
-// $Id: sphinxsearch.pages.inc,v 1.3 2008/08/30 06:53:31 markuspetrux Exp $
+// $Id: sphinxsearch.pages.inc,v 1.4 2008/09/12 02:44:22 markuspetrux Exp $
 
 /**
  * @file
@@ -16,6 +16,8 @@
  * @see sphinxsearch_get_query_string()
  */
 function sphinxsearch_search_page() {
+  global $user;
+
   if (isset($_POST['form_id'])) {
     // Let POST method redirect to GET.
     return drupal_get_form('sphinxsearch_search_form');
@@ -36,6 +38,21 @@ function sphinxsearch_search_page() {
   // If form was submitted, user has already been warned from submit handler.
   if (empty($search_options['filters'])) {
     return drupal_get_form('sphinxsearch_search_form', $search_options);
+  }
+
+  // Flood control.
+  $admin_access = user_access('administer sphinxsearch');
+  if (!$admin_access) {
+    $rid = ($user->uid ? DRUPAL_AUTHENTICATED_RID : DRUPAL_ANONYMOUS_RID);
+    $threshold = (int)variable_get('sphinxsearch_search_flood_per_role_'. $rid, 0);
+    if ($threshold > 0 && !flood_is_allowed('sphinxsearch:search', $threshold)) {
+      flood_register_event('sphinxsearch:search');
+      // This header is specially aimed to stop bad bots.
+      header('HTTP/1.0 403 Forbidden');
+      // Enable flood limit flag to not generate tagadelic/faceted search blocks.
+      sphinxsearch_flood_limit_exceeded(TRUE);
+      return t('You cannot perform more than @number search queries per hour. Please try again later.', array('@number' => $threshold));
+    }
   }
 
   // Execute search query and collect the results.
@@ -61,17 +78,23 @@ function sphinxsearch_search_page() {
     $output = drupal_get_form('sphinxsearch_search_form', $search_options);
     $output .= theme('box', t('Search results'), theme('sphinxsearch_search_results', $search_options, $search_results));
 
-    // Log the search keys.
-    $query_string = sphinxsearch_get_query_string($search_options);
-    watchdog(
-      'search',
-      t('%keys %query', array(
-        '%keys' => (!empty($search_options['filters']['keys']) ? $search_options['filters']['keys'] : t('(no keywords)')),
-        '%query' => (!empty($query_string) ? '?'. urldecode($query_string) : ''),
-      )),
-      WATCHDOG_NOTICE,
-      l(t('results'), sphinxsearch_get_search_path(), array(), $query_string)
-    );
+    // Register flood event for non-admins.
+    if (!$admin_access) {
+      flood_register_event('sphinxsearch:search');
+    }
+
+    // Log the search request?
+    $log_search_keys = variable_get('sphinxsearch_log_search_keys', 'always');
+    if ($log_search_keys == 'always' || ($log_search_keys == 'keys-only' && !empty($search_options['filters']['keys']))) {
+      $query_string = sphinxsearch_get_query_string($search_options);
+      watchdog('search', t('%keys %query', array(
+          '%keys' => (!empty($search_options['filters']['keys']) ? $search_options['filters']['keys'] : t('(no keywords)')),
+          '%query' => (!empty($query_string) ? '?'. urldecode($query_string) : ''),
+        )), NULL,
+        WATCHDOG_NOTICE,
+        l(t('results'), sphinxsearch_get_search_path(), array('query' => $query_string))
+      );
+    }
   }
 
   return $output;
@@ -90,7 +113,7 @@ function sphinxsearch_watchdog_warning($message) {
     drupal_set_message($message, 'error');
   }
   else {
-    watchdog('sphinxsearch', $message, WATCHDOG_WARNING);
+    watchdog('sphinxsearch', $message, NULL, WATCHDOG_WARNING);
   }
 }
 
@@ -104,7 +127,7 @@ function sphinxsearch_watchdog_warning($message) {
  * @return array
  *   The search form.
  */
-function sphinxsearch_search_form($search_options = array(), $advanced_options_collapsed = TRUE) {
+function sphinxsearch_search_form(&$form_state, $search_options = array(), $advanced_options_collapsed = TRUE) {
   $form = array(
     '#action' => url(sphinxsearch_get_search_path()),
     '#attributes' => array('class' => 'search-form'),
@@ -181,6 +204,8 @@ function sphinxsearch_search_form($search_options = array(), $advanced_options_c
           $form['advanced']['taxonomy']['tags'][$terms_key] = array(
             '#type' => 'textfield',
             '#title' => $vocabulary->name,
+            '#prefix' => '<div class="criterion">',
+            '#suffix' => '</div>',
             '#description' => t('If you wish to filter by more than one term, you can separate them with commas. Example: funny, bungee jumping, "Company, Inc.".'),
             '#default_value' => sphinxsearch_taxonomy_encode_typed_terms($search_terms),
             '#autocomplete_path' => 'taxonomy/autocomplete/'. $vid,
@@ -201,6 +226,8 @@ function sphinxsearch_search_form($search_options = array(), $advanced_options_c
               $form['advanced']['taxonomy'][$terms_key] = array(
                 '#type' => 'select',
                 '#title' => check_plain($vocabulary->name),
+                '#prefix' => '<div class="criterion">',
+                '#suffix' => '</div>',
                 '#description' => t('Select one or more items to filter search results by terms of this category.'),
                 '#default_value' => array_keys($search_terms),
                 '#options' => $options,
@@ -217,6 +244,8 @@ function sphinxsearch_search_form($search_options = array(), $advanced_options_c
         $form['advanced']['taxonomy'] += array(
           '#type' => 'fieldset',
           '#title' => t('Categories'),
+          '#prefix' => '<div class="clear-block"></div>',
+          '#suffix' => '<div class="clear-block"></div>',
           '#collapsible' => TRUE, '#collapsed' => empty($search_options['filters']['taxonomy']),
         );
       }
@@ -254,8 +283,8 @@ function sphinxsearch_search_form($search_options = array(), $advanced_options_c
 /**
  * Validate a search form submission.
  */
-function sphinxsearch_search_form_validate($form_id, $form_values) {
-  $search_options = sphinxsearch_parse_request($form_values);
+function sphinxsearch_search_form_validate($form, &$form_state) {
+  $search_options = sphinxsearch_parse_request($form_state['values']);
   if (!empty($search_options['errors'])) {
     foreach ($search_options['errors'] as $field_name => $message) {
       form_set_error($field_name, $message);
@@ -266,8 +295,8 @@ function sphinxsearch_search_form_validate($form_id, $form_values) {
 /**
  * Process a search form submission.
  */
-function sphinxsearch_search_form_submit($form_id, $form_values) {
-  $search_options = sphinxsearch_parse_request($form_values);
+function sphinxsearch_search_form_submit($form, &$form_state) {
+  $search_options = sphinxsearch_parse_request($form_state['values']);
   $query_string = sphinxsearch_get_query_string($search_options);
   if (empty($query_string)) {
     form_set_error('keys', t('Please enter some keywords and/or other search options.'));
@@ -306,7 +335,7 @@ function theme_sphinxsearch_search_results($search_options, $search_results) {
   $output .= '<dl class="search-results">' ."\n";
   foreach ($search_results['nodes'] as $item_id => $node) {
     $title = (isset($search_results['titles'][$item_id]) ? $search_results['titles'][$item_id] : check_plain($node->title));
-    $output .= '<dt class="title">'. l($title, 'node/'. $node->nid, array(), NULL, NULL, FALSE, TRUE) .'</dt>' ."\n";
+    $output .= '<dt class="title">'. l($title, 'node/'. $node->nid, array('html' => TRUE)) .'</dt>' ."\n";
     $info = array(
       theme('username', $node),
       format_date($node->created, 'small'),

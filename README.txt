@@ -1,6 +1,6 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Sphinx search module for Drupal 5.x
-;; $Id: README.txt,v 1.3 2008/08/30 06:53:31 markuspetrux Exp $
+;; $Id: README.txt,v 1.4 2008/09/12 02:44:22 markuspetrux Exp $
 ;;
 ;; Original author: markus_petrux at drupal.org (July 2008)
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -8,11 +8,8 @@
 REQUIREMENTS
 ============
 
-  - Drupal 5.x (planned port to D6)
   - PHP 4.4.x or PHP 5.x (PHP needs to be compiled with --enable-memory-limit).
-  - It should work for any DB engine supported by Drupal.
-  - Sphinx 0.9.8
-  - Shell access to the box where Sphinx is installed.
+  - Sphinx 0.9.8 (shell access is required here).
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -65,7 +62,7 @@ INSTALLATION
 
   3) Install sphinxsearch Drupal module.
 
-     - Copy to modules/sphinxsearch all files and directories.
+     - Copy package contents to modules/sphinxsearch.
      - Copy sphinxsearch_scripts subdirectory provided within this module to
        your Drupal root directory.
        Instead, you may wish to setup a symbolic link from your Drupal root to
@@ -292,13 +289,9 @@ TODO
 - Provide new hooks to allow external modules extend Sphinx document attributes
   and/or alter search user interface with additional filters.
 
-- Explore the possibilities to provide some level of faceted search.
-
 - Think about a reasonable method to implement access control to indexed data.
   Currently, all content indexed by this module is available to anyone with
   'use sphinxsearch' permission.
-
-- Port to Drupal 6.x.
 
 - Provide a better integration / user interface to co-exist with other search
   modules that may provide solutions for searching different kinds of content,

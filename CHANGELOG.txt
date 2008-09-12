@@ -1,6 +1,31 @@
 ================================================================================
-$Id: CHANGELOG.txt,v 1.3 2008/08/30 06:53:31 markuspetrux Exp $
+$Id: CHANGELOG.txt,v 1.4 2008/09/12 02:44:22 markuspetrux Exp $
 ================================================================================
+
+--------------------------------------------------------------------------------
+2008-09-11, tag: 6.x-1.x
+
+- Ported module from D5 to D6.
+- Bugfix: undefined class method in sphinxsearch_check_connection_page().
+- Bugfix: added criterion class to taxonomy elements in advanced search form.
+- Bugfix: added support for mysqli and pgsql to _sphinxsearch_db_reconnect().
+
+--------------------------------------------------------------------------------
+2008-09-03, tag: 5.x-1.1 release
+
+- Fixed bug "Could not obtain last nid." caused by error building SQL condition
+  for node type, when only one node type has been enabled.
+  Thanks to valcker, issue: #302614
+- Added flood control options with different thresholds for guests/reg. users.
+- Added option to disable logging of search keywords, or to log them only when
+  keywords have been specified. Note that most requests could only be made by
+  using tagadelic/faceted search related filters.
+- Added options to determine where the links of terms in the tag cloud should
+  point to (taxonomy managed links or start search with predefined filters).
+- Changed functions arguments for sphinxsearch_tagadelic_build_data() and
+  sphinxsearch_faceted_build_data().
+  These funcions are now easier to reuse, and eventually extend trying to not
+  break backwards compatibility.
 
 --------------------------------------------------------------------------------
 2008-08-29, tag: 5.x-1.0 release

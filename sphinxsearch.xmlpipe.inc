@@ -1,5 +1,5 @@
 <?php
-// $Id: sphinxsearch.xmlpipe.inc,v 1.3 2008/08/30 06:53:31 markuspetrux Exp $
+// $Id: sphinxsearch.xmlpipe.inc,v 1.4 2008/09/12 02:44:22 markuspetrux Exp $
 
 /**
  * @file
@@ -19,7 +19,7 @@ function sphinxsearch_xmlpipe($caller_version = 0) {
   $sphinxsearch_xmlpipe_generator_version = 2;
   if ((int)$caller_version != $sphinxsearch_xmlpipe_generator_version) {
     $message = t('Oops! It looks like version of your sphinxsearch_xmlpipe.php script does not match the version expected by the sphinxsearch module. Maybe someone forgot to upgrade the contents of the sphinxsearch_scripts subdirectory when updating the module.');
-    watchdog('sphinxsearch', $message, WATCHDOG_ERROR);
+    watchdog('sphinxsearch', $message, NULL, WATCHDOG_ERROR);
     print $message ."\n";
     exit;
   }
@@ -29,7 +29,7 @@ function sphinxsearch_xmlpipe($caller_version = 0) {
   $sphinxsearch_indexer_ips = array_map('trim', explode(',', variable_get('sphinxsearch_indexer_ips', '')));
   if (!empty($sphinxsearch_indexer_ips)) {
     foreach ($sphinxsearch_indexer_ips as $cidr) {
-      if (sphinxsearch_ip_check_cidr($_SERVER['REMOTE_ADDR'], $cidr)) {
+      if (sphinxsearch_ip_check_cidr(ip_address(), $cidr)) {
         $access_xmlpipe = TRUE;
         break;
       }
@@ -37,7 +37,7 @@ function sphinxsearch_xmlpipe($caller_version = 0) {
   }
   if (!$access_xmlpipe) {
     $message = t('Not authorized.');
-    watchdog('sphinxsearch', $message, WATCHDOG_ERROR);
+    watchdog('sphinxsearch', $message, NULL, WATCHDOG_ERROR);
     print $message ."\n";
     exit;
   }
@@ -59,7 +59,7 @@ function sphinxsearch_xmlpipe($caller_version = 0) {
   // Check PHP settings for resource consumption control.
   if ($GLOBALS['sphinxsearch_memory_limit'] < 0) {
     $message = t('Unable to obtain PHP memory limit. Please, make sure your PHP installation is compiled with --enable-memory-limit option.');
-    watchdog('sphinxsearch', $message, WATCHDOG_ERROR);
+    watchdog('sphinxsearch', $message, NULL, WATCHDOG_ERROR);
     print $message ."\n";
     exit;
   }
@@ -67,7 +67,7 @@ function sphinxsearch_xmlpipe($caller_version = 0) {
     $message = t('Maximum PHP execution time is set to @max_execution_time seconds, but this window is too short for this process.', array(
       '@max_execution_time' => $GLOBALS['sphinxsearch_max_execution_time']
     ));
-    watchdog('sphinxsearch', $message, WATCHDOG_ERROR);
+    watchdog('sphinxsearch', $message, NULL, WATCHDOG_ERROR);
     print $message ."\n";
     exit;
   }
@@ -91,7 +91,7 @@ function sphinxsearch_xmlpipe($caller_version = 0) {
       $last_nid = (int)db_result(db_query('SELECT nid FROM {node} WHERE status = 1'. $sql_node_types_condition .' ORDER BY nid DESC LIMIT 1'));
       if ($last_nid <= 0) {
         $message = t('Could not obtain last nid.');
-        watchdog('sphinxsearch', $message, WATCHDOG_ERROR);
+        watchdog('sphinxsearch', $message, NULL, WATCHDOG_ERROR);
         print $message ."\n";
         exit;
       }
@@ -103,7 +103,7 @@ function sphinxsearch_xmlpipe($caller_version = 0) {
   }
   else {
     $message = t('Invalid argument.');
-    watchdog('sphinxsearch', $message, WATCHDOG_ERROR);
+    watchdog('sphinxsearch', $message, NULL, WATCHDOG_ERROR);
     print $message ."\n";
     exit;
   }
@@ -136,7 +136,7 @@ function sphinxsearch_generate_xmlpipe_main($main_index_id, $first_nid, $last_ni
     $chunks_before_restart = 0;
   }
 
-  sphinxsearch_watchdog('sphinxsearch', t('XMLPipe processing for main index @main_index_id has started.<ul>
+  watchdog('sphinxsearch', t('XMLPipe processing for main index @main_index_id has started.<ul>
       <li>Nodes range: @first_nid-@last_nid.</li>
       <li>PHP max_execution_time: @max_execution_time seconds.</li>
       <li>PHP memory_limit: @memory_limit_bytes bytes (@memory_limit_kb KB).</li>
@@ -150,7 +150,7 @@ function sphinxsearch_generate_xmlpipe_main($main_index_id, $first_nid, $last_ni
     '@memory_limit_kb' => round($GLOBALS['sphinxsearch_memory_limit'] / 1024, 2),
     '@initial_memory_bytes' => $GLOBALS['sphinxsearch_initial_memory_usage'],
     '@initial_memory_kb' => round($GLOBALS['sphinxsearch_initial_memory_usage'] / 1024, 2),
-  )), WATCHDOG_NOTICE);
+  )), NULL, WATCHDOG_INFO);
 
   // Generate XMLPipe header.
   print sphinxsearch_xmlpipe_header();
@@ -180,7 +180,7 @@ function sphinxsearch_generate_xmlpipe_main($main_index_id, $first_nid, $last_ni
         '@current_memory_bytes' => $current_memory_bytes,
         '@current_memory_kb' => round($current_memory_bytes / 1024, 2),
       ));
-      sphinxsearch_watchdog('sphinxsearch', $message, WATCHDOG_ERROR);
+      _sphinxsearch_wrapper_watchdog('sphinxsearch', $message, NULL, WATCHDOG_ERROR);
       print strip_tags($message) ."\n";
       exit;
     }
@@ -195,7 +195,7 @@ function sphinxsearch_generate_xmlpipe_main($main_index_id, $first_nid, $last_ni
         '@max_execution_time' => $GLOBALS['sphinxsearch_max_execution_time'],
         '@current_execution_time' => $current_execution_time,
       ));
-      sphinxsearch_watchdog('sphinxsearch', $message, WATCHDOG_ERROR);
+      _sphinxsearch_wrapper_watchdog('sphinxsearch', $message, NULL, WATCHDOG_ERROR);
       print strip_tags($message) ."\n";
       exit;
     }
@@ -229,14 +229,14 @@ function sphinxsearch_generate_xmlpipe_main($main_index_id, $first_nid, $last_ni
       break;
     }
 
-    // Need to restart DB connection?
+    // Need to restart database connection?
     if ($chunks_before_restart > 0) {
       $chunks_counter++;
       if ($chunks_counter >= $chunks_before_restart) {
-        sphinxsearch_db_reconnect();
+        _sphinxsearch_db_reconnect();
         $current_memory_bytes = memory_get_usage();
         $current_execution_time = time() - $GLOBALS['sphinxsearch_start_execution_time'];
-        sphinxsearch_watchdog('sphinxsearch', t('Database server connection has been restarted.<ul>
+        $message = t('Database server connection has been restarted.<ul>
             <li>Initial memory usage: @initial_memory_bytes bytes (@initial_memory_kb KB).</li>
             <li>Current memory usage: @current_memory_bytes bytes (@current_memory_kb KB).</li>
             <li>Current execution time: @current_execution_time seconds.</li>
@@ -249,7 +249,8 @@ function sphinxsearch_generate_xmlpipe_main($main_index_id, $first_nid, $last_ni
           '@current_execution_time' => $current_execution_time,
           '@nodes_counter' => $nodes_counter,
           '@nodes_per_second' => ($current_execution_time > 0 ? round($nodes_counter / $current_execution_time, 2) : $nodes_counter),
-        )), WATCHDOG_ERROR);
+        ));
+        _sphinxsearch_wrapper_watchdog('sphinxsearch', $message, NULL, WATCHDOG_NOTICE);
         $chunks_counter = 0;
       }
     }
@@ -261,7 +262,7 @@ function sphinxsearch_generate_xmlpipe_main($main_index_id, $first_nid, $last_ni
   // Store process statistics to watchdog.
   $current_memory_bytes = memory_get_usage();
   $total_execution_time = time() - $GLOBALS['sphinxsearch_start_execution_time'];
-  sphinxsearch_watchdog('sphinxsearch', t('XMLPipe processing for main index @main_index_id has finished successfully.<ul>
+  $message = t('XMLPipe processing for main index @main_index_id has finished successfully.<ul>
       <li>Initial memory usage: @initial_memory_bytes bytes (@initial_memory_kb KB).</li>
       <li>Current memory usage: @current_memory_bytes bytes (@current_memory_kb KB).</li>
       <li>Total execution time: @total_execution_time seconds.</li>
@@ -275,7 +276,8 @@ function sphinxsearch_generate_xmlpipe_main($main_index_id, $first_nid, $last_ni
     '@total_execution_time' => $total_execution_time,
     '@nodes_counter' => $nodes_counter,
     '@nodes_per_second' => ($total_execution_time > 0 ? round($nodes_counter / $total_execution_time, 2) : $nodes_counter),
-  )), WATCHDOG_NOTICE);
+  ));
+  _sphinxsearch_wrapper_watchdog('sphinxsearch', $message, NULL, WATCHDOG_INFO);
   exit;
 }
 
@@ -300,7 +302,7 @@ function sphinxsearch_generate_xmlpipe_delta() {
   $sphinxsearch_query_index = variable_get('sphinxsearch_query_index', '');
   if (empty($sphinxsearch_query_index)) {
     $message = t('XMLPipe for delta index failed: Sphinx query index not specified. Please, check module settings.');
-    watchdog('sphinxsearch', $message, WATCHDOG_ERROR);
+    watchdog('sphinxsearch', $message, NULL, WATCHDOG_ERROR);
     print $message ."\n";
     exit;
   }
@@ -333,7 +335,7 @@ function sphinxsearch_generate_xmlpipe_delta() {
   }
   if (empty($main_indexes_info)) {
     $message = t('XMLPipe for delta index failed: Could not obtain list of main indexes from Sphinx.');
-    watchdog('sphinxsearch', $message, WATCHDOG_ERROR);
+    watchdog('sphinxsearch', $message, NULL, WATCHDOG_ERROR);
     print $message ."\n";
     exit;
   }
@@ -385,7 +387,7 @@ function sphinxsearch_generate_xmlpipe_delta() {
           '@query_key' => $query_key,
           '@main_index_id' => $main_index_id,
         ));
-        watchdog('sphinxsearch', $message, WATCHDOG_ERROR);
+        watchdog('sphinxsearch', $message, NULL, WATCHDOG_ERROR);
         print $message ."\n";
         exit;
       }
@@ -458,7 +460,7 @@ function sphinxsearch_generate_xmlpipe_delta() {
   // Store process statistics to watchdog.
   $current_memory_bytes = memory_get_usage();
   $total_execution_time = time() - $GLOBALS['sphinxsearch_start_execution_time'];
-  $watchdog_report = t('XMLPipe processing for delta index has finished successfully.<ul>
+  $message = t('XMLPipe processing for delta index has finished successfully.<ul>
       <li>Initial memory usage: @initial_memory_bytes bytes (@initial_memory_kb KB).</li>
       <li>Current memory usage: @current_memory_bytes bytes (@current_memory_kb KB).</li>
       <li>Total execution time: @total_execution_time seconds.</li>
@@ -472,8 +474,8 @@ function sphinxsearch_generate_xmlpipe_delta() {
     '@nodes_counter' => $nodes_counter,
     '@nodes_per_second' => ($total_execution_time > 0 ? round($nodes_counter / $total_execution_time, 2) : $nodes_counter),
   ));
-  $watchdog_report .= t('Statistics related to main indexes processed for this delta:') .'<ul>'. implode('', $watchdog_report_items) .'</ul>';
-  sphinxsearch_watchdog('sphinxsearch', $watchdog_report, WATCHDOG_NOTICE);
+  $message .= t('Statistics related to main indexes processed for this delta:') .'<ul>'. implode('', $watchdog_report_items) .'</ul>';
+  watchdog('sphinxsearch', $message, NULL, WATCHDOG_INFO);
   exit;
 }
 
@@ -586,15 +588,30 @@ function sphinxsearch_xmlpipe_document($main_index_id, $nid) {
 }
 
 /**
- * Restart DB server connection.
+ * Restart database server connection.
+ *
+ * This function is necessary because Drupal does not have a method to restart
+ * a database server connection.
+ * Note the main problem is that db_set_active() uses static variables to store
+ * the list of opened connections ($db_conns array). We can still access the
+ * currently active connection resource ($active_db), but this method breaks
+ * core capability to switch database server connections via db_set_active().
+ * This is normally no problem while XMLPipe processing takes place. However,
+ * when we invoke external hooks, some of them may rely on db_set_active() to
+ * perform their job, and in that case, restarting database server connection
+ * from here will break those hooks. sphinxsearch module users in that
+ * situation won't be able to use this feature, which is fortunately something
+ * totally optional that can be set from the module settings panel, and it is
+ * disabled by default.
+ * Ideally, db_set_active() would have to be patched to offer the possibility
+ * to restart database server connections.
+ *
+ * @see db_set_active()
  */
-function sphinxsearch_db_reconnect() {
+function _sphinxsearch_db_reconnect() {
   global $db_url, $db_type, $active_db;
   static $connect_url;
   if (!isset($connect_url)) {
-    if ($db_type != 'mysql') {
-      return;
-    }
     if (is_array($db_url)) {
       $connect_url = $db_url['default'];
     }
@@ -602,34 +619,91 @@ function sphinxsearch_db_reconnect() {
       $connect_url = $db_url;
     }
   }
-  mysql_close($active_db);
+  switch ($db_type) {
+    case 'mysql':
+      mysql_close($active_db);
+      break;
+    case 'mysqli':
+      mysqli_close($active_db);
+      break;
+    case 'pgsql':
+      pg_close($active_db);
+      break;
+    default:
+      return;
+  }
   $active_db = db_connect($connect_url);
 }
 
 /**
  * Log a system message.
  *
- * Note: Drupal watchdog() is broken by our sphinxsearch_db_reconnect().
+ * Actually, dblog_watchdog() implementation makes use of db_set_active() which
+ * breaks our database reconnection logic.
  *
  * @param $type
  *   The category to which this message belongs.
  * @param $message
- *   The message to store in the log.
+ *   The message to store in the log. See t() for documentation
+ *   on how $message and $variables interact. Keep $message
+ *   translatable by not concatenating dynamic values into it!
+ * @param $variables
+ *   Array of variables to replace in the message on display or
+ *   NULL if message is already translated or not possible to
+ *   translate.
  * @param $severity
- *   The severity of the message. One of the following values:
- *   - WATCHDOG_NOTICE
- *   - WATCHDOG_WARNING
- *   - WATCHDOG_ERROR
+ *   The severity of the message, as per RFC 3164
  * @param $link
  *   A link to associate with the message.
+ *
+ * @see sphinxsearch_generate_xmlpipe_main()
+ * @see _sphinxsearch_db_reconnect()
+ * @see watchdog()
+ * @see dblog_watchdog()
+ * @see db_set_active()
  */
-function sphinxsearch_watchdog($type, $message, $severity = WATCHDOG_NOTICE, $link = NULL) {
+function _sphinxsearch_wrapper_watchdog($type, $message, $variables = array(), $severity = WATCHDOG_NOTICE, $link = NULL) {
   global $user, $base_root;
 
-  // Note: log the exact, entire absolute URL.
-  $request_uri = $base_root . request_uri();
+  // Prepare the fields to be logged
+  $log_message = array(
+    'type'        => $type,
+    'message'     => $message,
+    'variables'   => $variables,
+    'severity'    => $severity,
+    'link'        => $link,
+    'user'        => $user,
+    'request_uri' => $base_root . request_uri(),
+    'referer'     => referer_uri(),
+    'ip'          => ip_address(),
+    'timestamp'   => time(),
+  );
 
-  db_query("INSERT INTO {watchdog} (uid, type, message, severity, link, location, referer, hostname, timestamp) VALUES (%d, '%s', '%s', %d, '%s', '%s', '%s', '%s', %d)", $user->uid, $type, $message, $severity, $link, $request_uri, referer_uri(), $_SERVER['REMOTE_ADDR'], time());
+  // Call the logging hooks to log/process the message
+  foreach (module_implements('watchdog', TRUE) as $module) {
+    if ($module == 'dblog') {
+      // This is exact same code than dblog_watchdog(), except we do not make
+      // use of db_set_active(), we can't and it is not really necessary here.
+      db_query("INSERT INTO {watchdog}
+        (uid, type, message, variables, severity, link, location, referer, hostname, timestamp)
+        VALUES
+        (%d, '%s', '%s', '%s', %d, '%s', '%s', '%s', '%s', %d)",
+        $log_message['user']->uid,
+        $log_message['type'],
+        $log_message['message'],
+        serialize($log_message['variables']),
+        $log_message['severity'],
+        $log_message['link'],
+        $log_message['request_uri'],
+        $log_message['referer'],
+        $log_message['ip'],
+        $log_message['timestamp']
+      );
+    }
+    else {
+      module_invoke($module, 'watchdog', $log_message);
+    }
+  }
 }
 
 /**

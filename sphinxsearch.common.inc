@@ -1,5 +1,5 @@
 <?php
-// $Id: sphinxsearch.common.inc,v 1.2 2008/08/30 06:53:31 markuspetrux Exp $
+// $Id: sphinxsearch.common.inc,v 1.3 2008/09/12 02:44:22 markuspetrux Exp $
 
 /**
  * @file
@@ -82,6 +82,27 @@ function sphinxsearch_goto_search($query = NULL) {
     $query = (!empty($query) ? drupal_query_string_encode($query) : NULL);
   }
   drupal_goto(sphinxsearch_get_search_path(), $query);
+}
+
+/**
+ * Check if user has exceeded flood limit.
+ *
+ * This function is aimed to hide implementation details.
+ *
+ * @see sphinxsearch_search_page()
+ * @see sphinxsearch_block()
+ *
+ * @param boolean $exceeded
+ *   TRUE to enable the flag. This argument is optional.
+ *
+ * @return boolean
+ *   TRUE is flood limit has been exceeded.
+ */
+function sphinxsearch_flood_limit_exceeded($exceeded = NULL) {
+  if (!empty($exceeded)) {
+    $GLOBALS['sphinxsearch_flood_limit_exceeded'] = TRUE;
+  }
+  return isset($GLOBALS['sphinxsearch_flood_limit_exceeded']);
 }
 
 /**
