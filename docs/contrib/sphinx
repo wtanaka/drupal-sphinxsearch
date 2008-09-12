@@ -1,5 +1,5 @@
 #!/bin/sh
-# $Id: sphinx,v 1.1 2008/08/18 17:59:29 markuspetrux Exp $
+# $Id: sphinx,v 1.1.4.1 2008/09/12 03:36:10 markuspetrux Exp $
 #
 # sphinx - This shell script takes care of starting and
 # stopping Sphinx search daemon.

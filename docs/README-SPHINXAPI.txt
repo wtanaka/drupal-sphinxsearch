@@ -1,5 +1,5 @@
 ================================================================================
-$Id: README-SPHINXAPI.txt,v 1.1 2008/08/18 17:59:29 markuspetrux Exp $
+$Id: README-SPHINXAPI.txt,v 1.1.4.1 2008/09/12 03:36:10 markuspetrux Exp $
 ================================================================================
 
 The lib directory under the sphinxsearch module contains the file sphinxapi.php

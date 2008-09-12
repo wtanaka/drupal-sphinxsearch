@@ -1,6 +1,6 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Sphinx search module for Drupal 5.x
-;; $Id: README.txt,v 1.4 2008/09/12 02:44:22 markuspetrux Exp $
+;; $Id: README.txt,v 1.4.2.1 2008/09/12 03:36:10 markuspetrux Exp $
 ;;
 ;; Original author: markus_petrux at drupal.org (July 2008)
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
