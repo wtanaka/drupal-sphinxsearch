@@ -1,11 +1,24 @@
 <?php
-// $Id: sphinxsearch.module,v 1.5.2.1 2008/09/12 03:36:10 markuspetrux Exp $
+// $Id: sphinxsearch.module,v 1.5.2.2 2008/10/28 18:41:16 markuspetrux Exp $
 
 /**
  * @file
  * Sphinx search integration for Drupal, based on XMLPipe source type
  * and support for main+delta index scheme.
  */
+
+/**
+ * Load common module functions.
+ */
+function sphinxsearch_load_common_includes() {
+  static $sphinxsearch_module_path;
+  if (!isset($sphinxsearch_module_path)) {
+    $sphinxsearch_module_path = drupal_get_path('module', 'sphinxsearch');
+    require_once($sphinxsearch_module_path .'/sphinxsearch.common.inc');
+    require_once($sphinxsearch_module_path .'/sphinxsearch.taxonomy.inc');
+  }
+}
+sphinxsearch_load_common_includes();
 
 /**
  * Implementation of hook_help().
@@ -60,13 +73,8 @@ function sphinxsearch_perm() {
  * Implementation of hook_init().
  */
 function sphinxsearch_init() {
-  // Load module common functions.
-  $module_path = drupal_get_path('module', 'sphinxsearch');
-  require_once($module_path .'/sphinxsearch.common.inc');
-  require_once($module_path .'/sphinxsearch.taxonomy.inc');
-
   // We need our own CSS in all pages because of tagadelic and similar blocks.
-  drupal_add_css($module_path .'/sphinxsearch.css');
+  drupal_add_css(drupal_get_path('module', 'sphinxsearch') .'/sphinxsearch.css');
 }
 
 /**
@@ -366,11 +374,16 @@ function sphinxsearch_get_memory_limit() {
  *
  * @param object reference $node
  *   Node reference to extract text from.
+ * @param int $build_mode
+ *   One of the following node build modes:
+ *   - NODE_BUILD_SEARCH_INDEX : Used by the indexer (XMLPipe processing).
+ *   - NODE_BUILD_SEARCH_RESULT: Used to build excerpts in search results.
  * @return string
  *   Text representation of the node.
  */
-function sphinxsearch_get_node_text(&$node) {
+function sphinxsearch_get_node_text(&$node, $build_mode) {
   // Build the node body.
+  $node->build_mode = $build_mode;
   $node = node_build_content($node, FALSE, FALSE);
   $node->body = drupal_render($node->content);
 
@@ -386,9 +399,8 @@ function sphinxsearch_get_node_text(&$node) {
   }
   unset($extra, $t);
 
-  // Strip control characters that aren't valid in xml.
-  // See http://www.w3.org/International/questions/qa-controls
-  $text = preg_replace('#[\\x00-\\x08\\x0B\\x0C\\x0E-\\x1F]#S', ' ', $text);
+  // Strip control characters that aren't valid in XML.
+  $text = sphinxsearch_strip_invalid_xml_codes($text);
 
   // Strip off all tags, but insert space before/after them to keep word boundaries.
   $text = str_replace(array('<', '>', '[', ']'), array(' <', '> ', ' ', ' '), $text);
@@ -400,6 +412,14 @@ function sphinxsearch_get_node_text(&$node) {
   $text = preg_replace("#(\s*)\n+#", "\n", $text);
 
   return $text;
+}
+
+/**
+ * Strip control characters that aren't valid in XML.
+ * See http://www.w3.org/International/questions/qa-controls
+ */
+function sphinxsearch_strip_invalid_xml_codes($text) {
+  return preg_replace('#[\x00-\x08\x0B\x0C\x0E-\x1F]#S', ' ', $text);
 }
 
 /**

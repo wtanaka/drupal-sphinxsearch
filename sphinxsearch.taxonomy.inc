@@ -1,5 +1,5 @@
 <?php
-// $Id: sphinxsearch.taxonomy.inc,v 1.3.2.1 2008/09/12 03:36:10 markuspetrux Exp $
+// $Id: sphinxsearch.taxonomy.inc,v 1.3.2.2 2008/10/28 18:41:16 markuspetrux Exp $
 
 /**
  * @file
@@ -19,7 +19,7 @@ function sphinxsearch_get_enabled_vocabularies() {
   if (!isset($vocabularies)) {
     $vocabularies = array();
     if (module_exists('taxonomy')) {
-      foreach(taxonomy_get_vocabularies() as $vocabulary) {
+      foreach (taxonomy_get_vocabularies() as $vocabulary) {
         if (variable_get('sphinxsearch_include_vocabulary_'. $vocabulary->vid, 0)) {
           $vocabularies[(int)$vocabulary->vid] = $vocabulary;
         }
@@ -537,7 +537,7 @@ function theme_sphinxsearch_faceted_block($facets) {
     if (!empty($facet->tags)) {
       $facet_tags = theme('sphinxsearch_tagadelic_block', $facet->tags);
       if (!empty($facet_tags)) {
-        $output .= '<div class="faceted-vocabulary"><h2>'. t('Refine search by: @vocabulary', array('@vocabulary' => $facet->title)) .'</h2>'. $facet_tags .'</div>' ."\n";
+        $output .= '<div class="faceted-vocabulary"><h2>'. t('Refine search by: @vocabulary', array('@vocabulary' => $facet->title)) .'</h2>'. $facet_tags .'</div>'."\n";
       }
     }
   }
@@ -565,7 +565,7 @@ function theme_sphinxsearch_tagadelic_block($tags) {
       $attributes['title'] = $tag->name .' ('. $tag->tagadelic_items .')';
     }
     $url = (!empty($tag->faceted_path) ? url($tag->faceted_path, array('query' => $tag->faceted_query)) : url(taxonomy_term_path($tag)));
-    $output .= '<a href="'. $url .'"'. drupal_attributes($attributes) .'>'. check_plain($tag->name) .'</a>' ."\n";
+    $output .= '<a href="'. $url .'"'. drupal_attributes($attributes) .'>'. check_plain($tag->name) .'</a>'."\n";
   }
 
   if (empty($output)) {

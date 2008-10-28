@@ -1,5 +1,5 @@
 <?php
-// $Id: sphinxsearch.common.inc,v 1.3.2.1 2008/09/12 03:36:10 markuspetrux Exp $
+// $Id: sphinxsearch.common.inc,v 1.3.2.2 2008/10/28 18:41:16 markuspetrux Exp $
 
 /**
  * @file
@@ -297,15 +297,12 @@ function sphinxsearch_parse_request($request_options = array()) {
     foreach (sphinxsearch_get_enabled_vocabularies() as $vid => $vocabulary) {
       $terms_key = 'terms'. $vid;
       if (!empty($request_options[$terms_key])) {
-        // Attempt to extract list of tids.
-        $tids = array_filter(array_map('intval', array_map('trim', explode(',', $request_options[$terms_key]))));
-        if ($request_options[$terms_key] != implode(',', $tids)) {
-          // Request came with a comma separated list of terms.
-          $terms = sphinxsearch_taxonomy_decode_typed_terms($vid, $request_options[$terms_key]);
+        // Terms may come as an array of tids (from non-freetagging form elements), or as a string of "typed terms".
+        if (is_array($request_options[$terms_key])) {
+          $terms = sphinxsearch_taxonomy_get_terms($vid, array_filter(array_map('intval', array_keys($request_options[$terms_key]))));
         }
         else {
-          // Request came with a comma separated list of tids.
-          $terms = sphinxsearch_taxonomy_get_terms($vid, $tids);
+          $terms = sphinxsearch_taxonomy_decode_typed_terms($vid, $request_options[$terms_key]);
         }
         // Check if we got not found terms.
         if (isset($terms[-1])) {
@@ -497,7 +494,7 @@ function sphinxsearch_execute_query($search_options) {
     if (isset($sphinx_match['attrs']['nid']) && ($node = node_load($sphinx_match['attrs']['nid']))) {
       $search_results['nodes'][] = $node;
       $search_results['titles'][] = check_plain($node->title);
-      $search_results['excerpts'][] = sphinxsearch_get_node_text($node);
+      $search_results['excerpts'][] = sphinxsearch_get_node_text($node, NODE_BUILD_SEARCH_RESULT);
     }
   }
 

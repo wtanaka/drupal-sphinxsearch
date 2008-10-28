@@ -1,5 +1,5 @@
 <?php
-// $Id: sphinxsearch.xmlpipe.inc,v 1.4.2.1 2008/09/12 03:36:10 markuspetrux Exp $
+// $Id: sphinxsearch.xmlpipe.inc,v 1.4.2.2 2008/10/28 18:41:16 markuspetrux Exp $
 
 /**
  * @file
@@ -88,7 +88,7 @@ function sphinxsearch_xmlpipe($caller_version = 0) {
       if (!empty($sql_node_types_condition)) {
         $sql_node_types_condition = ' AND '. $sql_node_types_condition;
       }
-      $last_nid = (int)db_result(db_query('SELECT nid FROM {node} WHERE status = 1'. $sql_node_types_condition .' ORDER BY nid DESC LIMIT 1'));
+      $last_nid = (int)db_result(db_query_range('SELECT nid FROM {node} WHERE status = 1'. $sql_node_types_condition .' ORDER BY nid DESC', 0, 1));
       if ($last_nid <= 0) {
         $message = t('Could not obtain last nid.');
         watchdog('sphinxsearch', $message, NULL, WATCHDOG_ERROR);
@@ -163,8 +163,7 @@ function sphinxsearch_generate_xmlpipe_main($main_index_id, $first_nid, $last_ni
     $sql_common_conditions = 'status = 1';
   }
 
-  while ( TRUE )
-  {
+  while (TRUE) {
     // Abort processing if current memory usage is more than 90%.
     $current_memory_bytes = memory_get_usage();
     if (intval($current_memory_bytes * 100 / $GLOBALS['sphinxsearch_memory_limit']) > 90) {
@@ -484,35 +483,35 @@ function sphinxsearch_generate_xmlpipe_delta() {
  */
 function sphinxsearch_xmlpipe_header() {
   // Start XMLPipe stream.
-  $output = '<'.'?xml version="1.0" encoding="utf-8"?'.'>' ."\n";
-  $output .= '<sphinx:docset>' ."\n";
+  $output = '<'.'?xml version="1.0" encoding="utf-8"?'.'>'."\n";
+  $output .= '<sphinx:docset>'."\n";
 
   // Build document schema.
-  $output .= '<sphinx:schema>' ."\n";
+  $output .= '<sphinx:schema>'."\n";
 
   // Text fields.
-  $output .= '<sphinx:field name="subject"/>' ."\n";
-  $output .= '<sphinx:field name="content"/>' ."\n";
+  $output .= '<sphinx:field name="subject"/>'."\n";
+  $output .= '<sphinx:field name="content"/>'."\n";
 
   // Node related attributes.
-  $output .= '<sphinx:attr name="nid" type="int" bits="32" default="0"/>' ."\n";
-  $output .= '<sphinx:attr name="uid" type="int" bits="32" default="0"/>' ."\n";
-  $output .= '<sphinx:attr name="nodetype" type="int" bits="32" default="0"/>' ."\n";
-  $output .= '<sphinx:attr name="created" type="timestamp"/>' ."\n";
-  $output .= '<sphinx:attr name="last_updated" type="timestamp"/>' ."\n";
+  $output .= '<sphinx:attr name="nid" type="int" bits="32" default="0"/>'."\n";
+  $output .= '<sphinx:attr name="uid" type="int" bits="32" default="0"/>'."\n";
+  $output .= '<sphinx:attr name="nodetype" type="int" bits="32" default="0"/>'."\n";
+  $output .= '<sphinx:attr name="created" type="timestamp"/>'."\n";
+  $output .= '<sphinx:attr name="last_updated" type="timestamp"/>'."\n";
 
   // Taxonomy related attributes.
   if ($GLOBALS['sphinxsearch_taxonomy_module_exists']) {
     foreach (sphinxsearch_get_enabled_vocabularies() as $vid => $void) {
-      $output .= '<sphinx:attr name="terms'. $vid .'" type="multi"/>' ."\n";
+      $output .= '<sphinx:attr name="terms'. $vid .'" type="multi"/>'."\n";
     }
-    $output .= '<sphinx:attr name="vid" type="multi"/>' ."\n";
+    $output .= '<sphinx:attr name="vid" type="multi"/>'."\n";
   }
 
   // Internal attributes.
-  $output .= '<sphinx:attr name="is_deleted" type="bool" default="0"/>' ."\n";
-  $output .= '<sphinx:attr name="main_index_id" type="int" bits="32" default="0"/>' ."\n";
-  $output .= '</sphinx:schema>' ."\n";
+  $output .= '<sphinx:attr name="is_deleted" type="bool" default="0"/>'."\n";
+  $output .= '<sphinx:attr name="main_index_id" type="int" bits="32" default="0"/>'."\n";
+  $output .= '</sphinx:schema>'."\n";
   return $output;
 }
 
@@ -540,20 +539,20 @@ function sphinxsearch_xmlpipe_document($main_index_id, $nid) {
   }
 
   // Obtain text representation of the node.
-  $text = sphinxsearch_get_node_text($node);
+  $text = sphinxsearch_get_node_text($node, NODE_BUILD_SEARCH_INDEX);
 
   // Generate the XML for this document.
-  $output .= '<sphinx:document id="'. $nid .'">' ."\n";
+  $output .= '<sphinx:document id="'. $nid .'">'."\n";
 
   // Text fields.
-  $output .= '<subject><![CDATA[['. check_plain($node->title) .']]></subject>' ."\n";
-  $output .= '<content><![CDATA[['. check_plain($text) .']]></content>' ."\n";
+  $output .= '<subject><![CDATA[['. check_plain(sphinxsearch_strip_invalid_xml_codes($node->title)) .']]></subject>'."\n";
+  $output .= '<content><![CDATA[['. check_plain($text) .']]></content>'."\n";
 
   // Node related attributes.
-  $output .= '<nid>'. $nid .'</nid>' ."\n";
-  $output .= '<uid>'. $node->uid .'</uid>' ."\n";
-  $output .= '<nodetype>'. sphinxsearch_xmlpipe_nodetype('id', $node->type) .'</nodetype>' ."\n";
-  $output .= '<created>'. $node->created .'</created>' ."\n";
+  $output .= '<nid>'. $nid .'</nid>'."\n";
+  $output .= '<uid>'. $node->uid .'</uid>'."\n";
+  $output .= '<nodetype>'. sphinxsearch_xmlpipe_nodetype('id', $node->type) .'</nodetype>'."\n";
+  $output .= '<created>'. $node->created .'</created>'."\n";
 
   // Taxonomy related attributes.
   if ($GLOBALS['sphinxsearch_taxonomy_module_exists']) {
@@ -568,22 +567,22 @@ function sphinxsearch_xmlpipe_document($main_index_id, $nid) {
     }
     if (!empty($vids)) {
       foreach ($vids as $vid => $tids) {
-        $output .= '<terms'. $vid .'>'. implode(' ', $tids) .'</terms'. $vid .'>' ."\n";
+        $output .= '<terms'. $vid .'>'. implode(' ', $tids) .'</terms'. $vid .'>'."\n";
       }
-      $output .= '<vid>'. implode(' ', array_keys($vids)) .'</vid>' ."\n";
+      $output .= '<vid>'. implode(' ', array_keys($vids)) .'</vid>'."\n";
     }
   }
 
   // Internal attributes.
   if (!empty($node->last_comment_timestamp) && $node->last_comment_timestamp > $node->changed) {
-    $output .= '<last_updated>'. $node->last_comment_timestamp .'</last_updated>' ."\n";
+    $output .= '<last_updated>'. $node->last_comment_timestamp .'</last_updated>'."\n";
   }
   else {
-    $output .= '<last_updated>'. $node->changed .'</last_updated>' ."\n";
+    $output .= '<last_updated>'. $node->changed .'</last_updated>'."\n";
   }
-  $output .= '<main_index_id>'. $main_index_id .'</main_index_id>' ."\n";
+  $output .= '<main_index_id>'. $main_index_id .'</main_index_id>'."\n";
 
-  $output .= '</sphinx:document>' ."\n";
+  $output .= '</sphinx:document>'."\n";
   return $output;
 }
 

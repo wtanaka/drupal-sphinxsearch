@@ -1,5 +1,5 @@
 <?php
-// $Id: sphinxsearch.pages.inc,v 1.4.2.1 2008/09/12 03:36:10 markuspetrux Exp $
+// $Id: sphinxsearch.pages.inc,v 1.4.2.2 2008/10/28 18:41:16 markuspetrux Exp $
 
 /**
  * @file
@@ -70,7 +70,7 @@ function sphinxsearch_search_page() {
       drupal_set_message($search_results['error_message'], 'error');
     }
     // Display no results warning and render expanded search form.
-    $output = theme('box', t('Your search yielded no results'), sphinxsearch_help('sphinxsearch#noresults'));
+    $output = theme('box', t('Your search yielded no results'), sphinxsearch_help('sphinxsearch#noresults', drupal_help_arg()));
     $output .= drupal_get_form('sphinxsearch_search_form', $search_options, FALSE);
   }
   else {
@@ -326,16 +326,16 @@ function theme_sphinxsearch_search_results($search_options, $search_results) {
     }
     $output .= ' '. t('Terms found:') .' '. implode('; ', $words) .'.';
   }
-  $output .= '</p>' ."\n";
+  $output .= '</p>'."\n";
   if ($search_results['total_found'] != $search_results['total_available']) {
     drupal_set_message(t('Warning: only the first @count matches are displayed. You may wish to use additional filters to reduce the number of results.', array('@count' => $search_results['total_available'])), 'error');
   }
 
   // Display list of formatted search results.
-  $output .= '<dl class="search-results">' ."\n";
+  $output .= '<dl class="search-results">'."\n";
   foreach ($search_results['nodes'] as $item_id => $node) {
     $title = (isset($search_results['titles'][$item_id]) ? $search_results['titles'][$item_id] : check_plain($node->title));
-    $output .= '<dt class="title">'. l($title, 'node/'. $node->nid, array('html' => TRUE)) .'</dt>' ."\n";
+    $output .= '<dt class="title">'. l($title, 'node/'. $node->nid, array('html' => TRUE)) .'</dt>'."\n";
     $info = array(
       theme('username', $node),
       format_date($node->created, 'small'),
@@ -344,19 +344,19 @@ function theme_sphinxsearch_search_results($search_options, $search_results) {
     if (!empty($extra) && is_array($extra)) {
       $info = array_merge($info, $extra);
     }
-    $excerpt = (isset($search_results['excerpts'][$item_id]) ? '<p class="search-excerpt">'. $search_results['excerpts'][$item_id] .'</p>' ."\n" : '');
+    $excerpt = (isset($search_results['excerpts'][$item_id]) ? '<p class="search-excerpt">'. $search_results['excerpts'][$item_id] .'</p>'."\n" : '');
     if (module_exists('taxonomy') && is_array($node->taxonomy)) {
       $links = array();
       foreach ($node->taxonomy as $term) {
         $links[] = l($term->name, taxonomy_term_path($term));
       }
       if (!empty($links)) {
-        $excerpt .= '<p class="search-links">'. t('Tags') .': '. implode(' - ', $links) .'</p>' ."\n";
+        $excerpt .= '<p class="search-links">'. t('Tags') .': '. implode(' - ', $links) .'</p>'."\n";
       }
     }
-    $output .= '<dd>'. $excerpt .'<p class="search-info">'. implode(' - ', $info) .'</p></dd>' ."\n";
+    $output .= '<dd>'. $excerpt .'<p class="search-info">'. implode(' - ', $info) .'</p></dd>'."\n";
   }
-  $output .= '</dl>' ."\n";
+  $output .= '</dl>'."\n";
 
   // Display pager.
   $output .= sphinxsearch_pager($search_results['total_available'], $search_options['results_per_page']);

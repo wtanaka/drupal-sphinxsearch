@@ -1,5 +1,5 @@
 <?php
-// $Id: sphinxsearch.admin.inc,v 1.4.2.1 2008/09/12 03:36:10 markuspetrux Exp $
+// $Id: sphinxsearch.admin.inc,v 1.4.2.2 2008/10/28 18:41:16 markuspetrux Exp $
 
 /**
  * @file
@@ -167,7 +167,7 @@ function sphinxsearch_settings() {
     '#description' => t('Use these options to select vocabularies that you wish to index. By default, if no vocabulary is selected here, all vocabularies in use for enabled content types will be indexed. <strong>Note that you will have to rebuild your indexes if you change these options and/or if you create new vocabularies.</strong>'),
   );
   if (module_exists('taxonomy')) {
-    foreach(taxonomy_get_vocabularies() as $vocabulary) {
+    foreach (taxonomy_get_vocabularies() as $vocabulary) {
       $form['index']['taxonomy']['sphinxsearch_include_vocabulary_'. $vocabulary->vid] = array(
         '#type' => 'checkbox',
         '#title' => $vocabulary->name,
@@ -314,7 +314,12 @@ function sphinxsearch_settings() {
       '#description' => t('Determines where the links of terms in the tag cloud should point to.'),
     );
   }
-  return system_settings_form($form);
+
+  // Let default settings form do its own job, and then
+  // inject our own submit handler.
+  $form = system_settings_form($form);
+  $form['#submit'][] = 'sphinxsearch_settings_submit';
+  return $form;
 }
 
 /**
@@ -337,7 +342,7 @@ function sphinxsearch_settings_validate($form, &$form_state) {
  */
 function sphinxsearch_settings_submit($form, &$form_state) {
   // Rebuild menus when search page path has been changed.
-  if ($form_state['values']['sphinxsearch_search_path'] != variable_get('sphinxsearch_search_path', 'search-content')) {
+  if ($form_state['values']['sphinxsearch_search_path'] != $form['search']['results']['sphinxsearch_search_path']['#default_value']) {
     menu_rebuild();
   }
 }
