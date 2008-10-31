@@ -1,5 +1,5 @@
 <?php
-// $Id: sphinxsearch.install,v 1.3.2.1 2008/09/12 03:36:10 markuspetrux Exp $
+// $Id: sphinxsearch.install,v 1.3.2.2 2008/10/31 13:15:45 markuspetrux Exp $
 
 /**
  * @file
@@ -34,9 +34,19 @@ function sphinxsearch_update_1() {
 }
 
 /**
- * Removed Sphinx document ids offset option.
+ * Removed internal module variable for Sphinx document ids offset option.
  */
 function sphinxsearch_update_2() {
   variable_del('sphinxsearch_docid_offset');
+  return array();
+}
+
+/**
+ * Removed internal module variable used to convert content types to and from
+ * Sphinx attributes. Content type sphinx attribute is now indexed and queried
+ * as text field (using extended2 matching mode).
+ */
+function sphinxsearch_update_6100() {
+  variable_del('sphinxsearch_node_type_ids');
   return array();
 }

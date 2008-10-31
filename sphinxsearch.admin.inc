@@ -1,5 +1,5 @@
 <?php
-// $Id: sphinxsearch.admin.inc,v 1.4.2.2 2008/10/28 18:41:16 markuspetrux Exp $
+// $Id: sphinxsearch.admin.inc,v 1.4.2.3 2008/10/31 13:15:45 markuspetrux Exp $
 
 /**
  * @file
@@ -144,11 +144,10 @@ function sphinxsearch_settings() {
     '#options' => drupal_map_assoc(array(0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 60, 70, 80, 90, 100)),
     '#description' => t('Use this option to tell XMLPipe generator to restart DB server conecction after this specified number of chunks. Use 0 to process all nodes in one single connection.'),
   );
-  $enabled_node_types = sphinxsearch_get_enabled_node_types();
   $form['index']['nodetypes'] = array(
     '#type' => 'fieldset',
     '#title' => t('Content type settings'),
-    '#collapsible' => TRUE, '#collapsed' => !empty($enabled_node_types),
+    '#collapsible' => TRUE, '#collapsed' => (bool)count(sphinxsearch_get_enabled_node_types()),
     '#description' => t('Use these options to select content types that you wish to be included in your Sphinx indexes. By default, if no content type is selected here, nodes of all content types will be indexed. <strong>Note that you will have to rebuild your indexes if you change these options.</strong>'),
   );
   foreach (node_get_types() as $node_type) {
@@ -159,11 +158,10 @@ function sphinxsearch_settings() {
       '#default_value' => variable_get('sphinxsearch_include_node_type_'. $node_type->type, 0),
     );
   }
-  $enabled_vocabularies = sphinxsearch_get_enabled_vocabularies();
   $form['index']['taxonomy'] = array(
     '#type' => 'fieldset',
     '#title' => t('Taxonomy settings'),
-    '#collapsible' => TRUE, '#collapsed' => !empty($enabled_vocabularies),
+    '#collapsible' => TRUE, '#collapsed' => (bool)count(sphinxsearch_get_enabled_vocabularies()),
     '#description' => t('Use these options to select vocabularies that you wish to index. By default, if no vocabulary is selected here, all vocabularies in use for enabled content types will be indexed. <strong>Note that you will have to rebuild your indexes if you change these options and/or if you create new vocabularies.</strong>'),
   );
   if (module_exists('taxonomy')) {

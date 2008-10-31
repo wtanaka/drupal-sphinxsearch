@@ -1,5 +1,5 @@
 <?php
-// $Id: sphinxsearch.common.inc,v 1.3.2.2 2008/10/28 18:41:16 markuspetrux Exp $
+// $Id: sphinxsearch.common.inc,v 1.3.2.3 2008/10/31 13:15:45 markuspetrux Exp $
 
 /**
  * @file
@@ -149,6 +149,113 @@ function &sphinxsearch_get_client() {
 function sphinxsearch_check_connection() {
   $sphinxsearch = &sphinxsearch_get_client();
   return $sphinxsearch->_Connect() ? TRUE : FALSE;
+}
+
+/**
+ * Invoke a hook_sphinxsearch_api() operation in all modules.
+ *
+ * @param $op
+ *   A string containing the name of the sphinxsearch_api operation.
+ * @param $a1, $a2
+ *   Arguments to pass on to the hook, after the $op argument.
+ * @return
+ *   The returned value of the invoked hooks.
+ */
+function sphinxsearch_invoke_api($op, $a1 = NULL, $a2 = NULL) {
+  $return = array();
+  foreach (module_implements('sphinxsearch_api') as $module) {
+    $function = $module .'_sphinxsearch_api';
+    $result = $function($op, $a1, $a2);
+    if (isset($result)) {
+      if (is_array($result)) {
+        $return = array_merge($return, $result);
+      }
+      else {
+        $return[] = $result;
+      }
+    }
+  }
+  return $return;
+}
+
+/**
+ * Implementation of hook_sphinxsearch_api().
+ */
+function sphinxsearch_sphinxsearch_api($op, $node = NULL) {
+  static $vocabularies;
+  if (!isset($vocabularies)) {
+    $vocabularies = sphinxsearch_get_enabled_vocabularies();
+  }
+  if ($op == 'sphinx_schema') {
+    $schema = array(
+      'nid' => array(
+        'sphinx_type' => 'int',
+      ),
+      'uid' => array(
+        'sphinx_type' => 'int',
+      ),
+      'created' => array(
+        'sphinx_type' => 'timestamp',
+      ),
+      'last_updated' => array(
+        'sphinx_type' => 'timestamp',
+      ),
+      'nodetype' => array(
+        'sphinx_type' => 'text',
+      ),
+      'subject' => array(
+        'sphinx_type' => 'text',
+        'sphinx_weight' => 2,
+      ),
+      'content' => array(
+        'sphinx_type' => 'text',
+        'sphinx_weight' => 1,
+      ),
+      'vid' => array(
+        'sphinx_type' => 'multi',
+      ),
+    );
+    foreach (array_keys($vocabularies) as $vid) {
+      $schema['terms'. $vid] = array(
+        'sphinx_type' => 'multi',
+      );
+    }
+    return $schema;
+  }
+  else if ($op == 'sphinx_document') {
+    $document = array(
+      'subject' => sphinxsearch_strip_invalid_xml_codes($node->title),
+      'content' => sphinxsearch_get_node_text($node, NODE_BUILD_SEARCH_INDEX),
+      'nid' => $node->nid,
+      'uid' => $node->uid,
+      'created' => $node->created,
+      'nodetype' => $node->type,
+    );
+    if (!empty($node->last_comment_timestamp) && $node->last_comment_timestamp > $node->changed) {
+      $document['last_updated'] = $node->last_comment_timestamp;
+    }
+    else {
+      $document['last_updated'] = $node->changed;
+    }
+    if (!empty($vocabularies) && isset($node->taxonomy)) {
+      $vids = array();
+      foreach ($node->taxonomy as $tid => $term) {
+        if (isset($vocabularies[$term->vid])) {
+          if (!isset($vids[$term->vid])) {
+            $vids[$term->vid] = array();
+          }
+          $vids[$term->vid][] = $tid;
+        }
+      }
+      if (!empty($vids)) {
+        foreach ($vids as $vid => $tids) {
+          $document['terms'. $vid] = implode(' ', $tids);
+        }
+        $document['vid'] = implode(' ', array_keys($vids));
+      }
+    }
+    return $document;
+  }
 }
 
 /**
@@ -304,6 +411,7 @@ function sphinxsearch_parse_request($request_options = array()) {
         else {
           $terms = sphinxsearch_taxonomy_decode_typed_terms($vid, $request_options[$terms_key]);
         }
+
         // Check if we got not found terms.
         if (isset($terms[-1])) {
           $search_options['errors'][$terms_key] = t('The following terms have not been found in category %category: %terms.', array(
@@ -357,7 +465,7 @@ function sphinxsearch_execute_query($search_options) {
     'excerpts' => array(),
     'groups' => array(),
   );
-  $sphinx_query_keywords = $search_options['filters']['keys'];
+  $sphinx_query_keywords = array($search_options['filters']['keys']);
 
   // Obtain distributed index name, required to resolve search query.
   $sphinxsearch_query_index = variable_get('sphinxsearch_query_index', '');
@@ -389,19 +497,23 @@ function sphinxsearch_execute_query($search_options) {
   $sphinxsearch->ResetFilters();
   $sphinxsearch->ResetGroupBy();
   $sphinxsearch->SetLimits($current_page * $search_options['results_per_page'], $search_options['results_per_page']);
-  $sphinxsearch->SetFieldWeights(array('subject' => 2, 'content' => 1));
+  $field_weights = sphinxsearch_get_sphinx_field_weights();
+  if (!empty($field_weights)) {
+    $sphinxsearch->SetFieldWeights($field_weights);
+  }
   $sphinxsearch->SetFilter('is_deleted', array(0));
 
   // Matching modes.
   if ($search_options['matchmode'] == SPHINXSEARCH_MATCH_PHRASE) {
-    $sphinx_query_keywords = '"'. trim($sphinxsearch->EscapeString($sphinx_query_keywords)) .'"';
+    $sphinx_query_keywords[0] = '"'. trim($sphinxsearch->EscapeString($sphinx_query_keywords[0])) .'"';
   }
   else {
-    $sphinx_query_keywords = implode(
+    $sphinx_query_keywords[0] = implode(
       ($search_options['matchmode'] == SPHINXSEARCH_MATCH_ALL ? ' ' : ' | '),
-      array_filter(array_map('trim', explode(' ', $sphinxsearch->EscapeString($sphinx_query_keywords))))
+      array_filter(array_map('trim', explode(' ', $sphinxsearch->EscapeString($sphinx_query_keywords[0]))))
     );
   }
+  $sphinx_excerpt_keywords = $sphinx_query_keywords[0];
   $sphinxsearch->SetMatchMode(SPH_MATCH_EXTENDED2);
 
   // Filter by content author.
@@ -411,13 +523,11 @@ function sphinxsearch_execute_query($search_options) {
 
   // Filter by content type.
   if (isset($search_options['filters']['types'])) {
-    $filter_values = array();
+    $types = array();
     foreach ($search_options['filters']['types'] as $type) {
-      $filter_values[] = sphinxsearch_xmlpipe_nodetype('id', $type);
+      $types[] = '"'. trim($sphinxsearch->EscapeString($type)) .'"';
     }
-    if (!empty($filter_values)) {
-      $sphinxsearch->SetFilter('nodetype', $filter_values);
-    }
+    $sphinx_query_keywords[] = '@nodetype '. implode(' | ', $types);
   }
 
   // Filter by taxonomy.
@@ -445,7 +555,7 @@ function sphinxsearch_execute_query($search_options) {
   }
 
   // Send query to Sphinx.
-  $sphinx_results = $sphinxsearch->Query($sphinx_query_keywords, $sphinxsearch_query_index);
+  $sphinx_results = $sphinxsearch->Query(implode(' ', $sphinx_query_keywords), $sphinxsearch_query_index);
   if (!$sphinx_results) {
     $message = $sphinxsearch->GetLastError();
     if (!sphinxsearch_check_connection()) {
@@ -476,11 +586,7 @@ function sphinxsearch_execute_query($search_options) {
   if (!empty($search_options['group_by'])) {
     foreach ($sphinx_results['matches'] as $sphinx_match) {
       if (isset($sphinx_match['attrs']['@groupby']) && isset($sphinx_match['attrs']['@count'])) {
-        $group_id = $sphinx_match['attrs']['@groupby'];
-        if ($search_options['group_by'] == 'nodetype') {
-          $group_id = sphinxsearch_xmlpipe_nodetype('name', $group_id);
-        }
-        $search_results['groups'][$group_id] = array(
+        $search_results['groups'][$sphinx_match['attrs']['@groupby']] = array(
           'count' => $sphinx_match['attrs']['@count'],
           'weight' => $sphinx_match['weight'],
         );
@@ -501,7 +607,7 @@ function sphinxsearch_execute_query($search_options) {
   // Use Sphinx to build excerpts.
   if (!empty($sphinxsearch_excerpts_index)) {
     // Build node titles with highlighted keywords.
-    $search_results['titles'] = $sphinxsearch->BuildExcerpts($search_results['titles'], $sphinxsearch_excerpts_index, $sphinx_query_keywords, array(
+    $search_results['titles'] = $sphinxsearch->BuildExcerpts($search_results['titles'], $sphinxsearch_excerpts_index, $sphinx_excerpt_keywords, array(
       'before_match' => '<span class="search-keyword-match">',
       'after_match' => '</span>',
       'chunk_separator' => '',
@@ -516,7 +622,7 @@ function sphinxsearch_execute_query($search_options) {
     }
 
     // Build node excerpts with highlighted keywords.
-    $search_results['excerpts'] = $sphinxsearch->BuildExcerpts($search_results['excerpts'], $sphinxsearch_excerpts_index, $sphinx_query_keywords, array(
+    $search_results['excerpts'] = $sphinxsearch->BuildExcerpts($search_results['excerpts'], $sphinxsearch_excerpts_index, $sphinx_excerpt_keywords, array(
       'before_match' => '<span class="search-keyword-match">',
       'after_match' => '</span>',
       'chunk_separator' => '<span class="search-chunk-separator"> ... </span>',

@@ -1,5 +1,5 @@
 <?php
-// $Id: sphinxsearch.xmlpipe.inc,v 1.4.2.2 2008/10/28 18:41:16 markuspetrux Exp $
+// $Id: sphinxsearch.xmlpipe.inc,v 1.4.2.3 2008/10/31 13:15:45 markuspetrux Exp $
 
 /**
  * @file
@@ -155,14 +155,6 @@ function sphinxsearch_generate_xmlpipe_main($main_index_id, $first_nid, $last_ni
   // Generate XMLPipe header.
   print sphinxsearch_xmlpipe_header();
 
-  $sql_common_conditions = sphinxsearch_get_enabled_node_types_condition();
-  if (!empty($sql_common_conditions)) {
-    $sql_common_conditions = 'status = 1 AND '. $sql_common_conditions;
-  }
-  else {
-    $sql_common_conditions = 'status = 1';
-  }
-
   while (TRUE) {
     // Abort processing if current memory usage is more than 90%.
     $current_memory_bytes = memory_get_usage();
@@ -203,7 +195,8 @@ function sphinxsearch_generate_xmlpipe_main($main_index_id, $first_nid, $last_ni
     $range_end = min($range_start + $range_step, $last_nid);
     $nids = array();
     $result = db_query('SELECT nid FROM {node}
-      WHERE '. $sql_common_conditions .' AND nid >= %d AND nid <= %d
+      WHERE '. implode(' AND ', array_filter(array('status = 1', sphinxsearch_get_enabled_node_types_condition()))) .'
+        AND nid >= %d AND nid <= %d
       ORDER BY nid ASC', array($range_start, $range_end));
     while ($row = db_fetch_object($result)) {
       $nids[] = $row->nid;
@@ -401,19 +394,11 @@ function sphinxsearch_generate_xmlpipe_delta() {
   $main_indexes_count = count($main_indexes_info);
   $last_main_index_id = array_pop(array_keys($main_indexes_info));
 
-  $sql_common_conditions = sphinxsearch_get_enabled_node_types_condition('n');
-  if (!empty($sql_common_conditions)) {
-    $sql_common_conditions = 'n.status = 1 AND '. $sql_common_conditions;
-  }
-  else {
-    $sql_common_conditions = 'n.status = 1';
-  }
-
   foreach ($main_indexes_info as $main_index_id => $main_index_info) {
     // Load the nids we are about to process for current main index interval.
     $nids = array();
     $query_sql = 'SELECT n.nid FROM {node} n LEFT JOIN {node_comment_statistics} c ON c.nid = n.nid
-      WHERE '. $sql_common_conditions .'
+      WHERE '. implode(' AND ', array_filter(array('n.status = 1', sphinxsearch_get_enabled_node_types_condition('n')))) .'
         AND GREATEST(IF(c.last_comment_timestamp IS NULL, 0, c.last_comment_timestamp), n.changed) > %d
         AND n.nid >= %d';
     $query_args = array($main_index_info['last_updated'], $main_index_info['first_nid']);
@@ -482,35 +467,41 @@ function sphinxsearch_generate_xmlpipe_delta() {
  * Generate the XMLPipe header.
  */
 function sphinxsearch_xmlpipe_header() {
-  // Start XMLPipe stream.
+  // Collect information about Sphinx document fields and attributes.
+  $GLOBALS['sphinxsearch_xmlpipe_schema'] = array_merge(sphinxsearch_invoke_api('sphinx_schema'), array(
+    // Flag to take care of deleted documents until main indexes are rebuilt.
+    'is_deleted' => array('sphinx_type' => 'bool', 'sphinx_default' => 0),
+    // Main Index ID is used for delta index processing.
+    'main_index_id' => array('sphinx_type' => 'int'),
+  ));
+
+  // Build Sphinx documents schema.
   $output = '<'.'?xml version="1.0" encoding="utf-8"?'.'>'."\n";
   $output .= '<sphinx:docset>'."\n";
-
-  // Build document schema.
   $output .= '<sphinx:schema>'."\n";
-
-  // Text fields.
-  $output .= '<sphinx:field name="subject"/>'."\n";
-  $output .= '<sphinx:field name="content"/>'."\n";
-
-  // Node related attributes.
-  $output .= '<sphinx:attr name="nid" type="int" bits="32" default="0"/>'."\n";
-  $output .= '<sphinx:attr name="uid" type="int" bits="32" default="0"/>'."\n";
-  $output .= '<sphinx:attr name="nodetype" type="int" bits="32" default="0"/>'."\n";
-  $output .= '<sphinx:attr name="created" type="timestamp"/>'."\n";
-  $output .= '<sphinx:attr name="last_updated" type="timestamp"/>'."\n";
-
-  // Taxonomy related attributes.
-  if ($GLOBALS['sphinxsearch_taxonomy_module_exists']) {
-    foreach (sphinxsearch_get_enabled_vocabularies() as $vid => $void) {
-      $output .= '<sphinx:attr name="terms'. $vid .'" type="multi"/>'."\n";
+  foreach ($GLOBALS['sphinxsearch_xmlpipe_schema'] as $name => $attributes) {
+    if ($attributes['sphinx_type'] == 'multi') {
+      $output .= '<sphinx:attr name="'. $name .'" type="multi"/>'."\n";
     }
-    $output .= '<sphinx:attr name="vid" type="multi"/>'."\n";
+    else if ($attributes['sphinx_type'] == 'int') {
+      $default = (isset($attributes['sphinx_default']) ? (int)$attributes['sphinx_default'] : 0);
+      $output .= '<sphinx:attr name="'. $name .'" type="int" bits="32" default="'. $default .'"/>'."\n";
+    }
+    else if ($attributes['sphinx_type'] == 'bool') {
+      $default = (isset($attributes['sphinx_default']) ? (int)(bool)$attributes['sphinx_default'] : 0);
+      $output .= '<sphinx:attr name="'. $name .'" type="bool" default="'. $default .'"/>'."\n";
+    }
+    else if ($attributes['sphinx_type'] == 'timestamp') {
+      $output .= '<sphinx:attr name="'. $name .'" type="timestamp"/>'."\n";
+    }
+    else if ($attributes['sphinx_type'] == 'text') {
+      $output .= '<sphinx:field name="'. $name .'"/>'."\n";
+    }
+    else if ($attributes['sphinx_type'] == 'float') {
+      $default = (isset($attributes['sphinx_default']) ? (float)$attributes['sphinx_default'] : 0);
+      $output .= '<sphinx:attr name="'. $name .'" type="float" default="'. $default .'"/>'."\n";
+    }
   }
-
-  // Internal attributes.
-  $output .= '<sphinx:attr name="is_deleted" type="bool" default="0"/>'."\n";
-  $output .= '<sphinx:attr name="main_index_id" type="int" bits="32" default="0"/>'."\n";
   $output .= '</sphinx:schema>'."\n";
   return $output;
 }
@@ -527,61 +518,26 @@ function sphinxsearch_xmlpipe_footer() {
  * Generate a single XMLPipe document.
  */
 function sphinxsearch_xmlpipe_document($main_index_id, $nid) {
-  static $vocabularies;
-  if (!isset($vocabularies)) {
-    $vocabularies = sphinxsearch_get_enabled_vocabularies();
-  }
-
-  $node = node_load($nid, NULL, TRUE);
-  $output = '';
-  if (!$node) {
+  // Load the node (reseting the node_load cache).
+  if (!($node = node_load($nid, NULL, TRUE))) {
     return FALSE;
   }
 
-  // Obtain text representation of the node.
-  $text = sphinxsearch_get_node_text($node, NODE_BUILD_SEARCH_INDEX);
+  // Collect Sphinx document data.
+  $document = array_merge(sphinxsearch_invoke_api('sphinx_document', $node), array(
+    'main_index_id' => $main_index_id,
+  ));
 
-  // Generate the XML for this document.
-  $output .= '<sphinx:document id="'. $nid .'">'."\n";
-
-  // Text fields.
-  $output .= '<subject><![CDATA[['. check_plain(sphinxsearch_strip_invalid_xml_codes($node->title)) .']]></subject>'."\n";
-  $output .= '<content><![CDATA[['. check_plain($text) .']]></content>'."\n";
-
-  // Node related attributes.
-  $output .= '<nid>'. $nid .'</nid>'."\n";
-  $output .= '<uid>'. $node->uid .'</uid>'."\n";
-  $output .= '<nodetype>'. sphinxsearch_xmlpipe_nodetype('id', $node->type) .'</nodetype>'."\n";
-  $output .= '<created>'. $node->created .'</created>'."\n";
-
-  // Taxonomy related attributes.
-  if ($GLOBALS['sphinxsearch_taxonomy_module_exists']) {
-    $vids = array();
-    foreach ($node->taxonomy as $tid => $term) {
-      if (empty($vocabularies) || isset($vocabularies[$term->vid])) {
-        if (!isset($vids[$term->vid])) {
-          $vids[$term->vid] = array();
-        }
-        $vids[$term->vid][] = $tid;
+  // Build Sphinx document stream.
+  $output = '<sphinx:document id="'. $nid .'">'."\n";
+  foreach ($document as $name => $value) {
+    if (isset($GLOBALS['sphinxsearch_xmlpipe_schema'][$name])) {
+      if ($GLOBALS['sphinxsearch_xmlpipe_schema'][$name]['sphinx_type'] == 'text') {
+        $value = '<![CDATA[['. check_plain($value) .']]>';
       }
-    }
-    if (!empty($vids)) {
-      foreach ($vids as $vid => $tids) {
-        $output .= '<terms'. $vid .'>'. implode(' ', $tids) .'</terms'. $vid .'>'."\n";
-      }
-      $output .= '<vid>'. implode(' ', array_keys($vids)) .'</vid>'."\n";
+      $output .= '<'. $name .'>'. $value .'</'. $name .'>'."\n";
     }
   }
-
-  // Internal attributes.
-  if (!empty($node->last_comment_timestamp) && $node->last_comment_timestamp > $node->changed) {
-    $output .= '<last_updated>'. $node->last_comment_timestamp .'</last_updated>'."\n";
-  }
-  else {
-    $output .= '<last_updated>'. $node->changed .'</last_updated>'."\n";
-  }
-  $output .= '<main_index_id>'. $main_index_id .'</main_index_id>'."\n";
-
   $output .= '</sphinx:document>'."\n";
   return $output;
 }
