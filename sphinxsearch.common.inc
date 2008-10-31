@@ -1,5 +1,5 @@
 <?php
-// $Id: sphinxsearch.common.inc,v 1.3.2.3 2008/10/31 13:15:45 markuspetrux Exp $
+// $Id: sphinxsearch.common.inc,v 1.3.2.4 2008/10/31 15:57:13 markuspetrux Exp $
 
 /**
  * @file
@@ -256,6 +256,26 @@ function sphinxsearch_sphinxsearch_api($op, $node = NULL) {
     }
     return $document;
   }
+}
+
+/**
+ * Obtain weight of sphinx text fields.
+ *
+ * @return array
+ *
+ * @see sphinxsearch_execute_query()
+ */
+function sphinxsearch_get_sphinx_field_weights() {
+  static $field_weights;
+  if (!isset($field_weights)) {
+    $field_weights = array();
+    foreach (sphinxsearch_invoke_api('sphinx_schema') as $name => $info) {
+      if (isset($info['sphinx_type']) && $info['sphinx_type'] == 'text' && isset($info['sphinx_weight'])) {
+        $field_weights[$name] = (int)$info['sphinx_weight'];
+      }
+    }
+  }
+  return $field_weights;
 }
 
 /**
