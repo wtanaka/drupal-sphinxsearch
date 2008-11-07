@@ -1,5 +1,5 @@
 <?php
-// $Id: sphinxsearch.module,v 1.5.2.4 2008/10/31 15:57:13 markuspetrux Exp $
+// $Id: sphinxsearch.module,v 1.5.2.5 2008/11/07 18:56:27 markuspetrux Exp $
 
 /**
  * @file
@@ -404,7 +404,7 @@ function sphinxsearch_get_node_text(&$node, $build_mode) {
 
   // Strip off all tags, but insert space before/after them to keep word boundaries.
   $text = str_replace(array('<', '>', '[', ']'), array(' <', '> ', ' ', ' '), $text);
-  $text = preg_replace('#<(script|style)[^>]*>.*</\1>#', ' ', $text);
+  $text = preg_replace('#<(script|style)[^>]*>.*</\1>#s', ' ', $text);
   $text = strip_tags($text);
 
   // Reduce size a little removing redudant spaces and line breaks.
