@@ -1,0 +1,8 @@
+################################################################################
+# $Id: .htaccess,v 1.4.2.1 2008/09/12 03:36:10 markuspetrux Exp $
+################################################################################
+
+# php_flag display_errors 1
+php_value memory_limit 64M
+php_value max_execution_time 3600
+php_value mysql.connect_timeout 3600
